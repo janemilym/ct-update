@@ -1,0 +1,9 @@
+name: ct_update
+channels:
+  - conda-forge
+dependencies:
+  - python=3.8.13
+  - pip
+  - pip:
+      - -r requirements.txt
+      - -e .
