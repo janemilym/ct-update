@@ -1,9 +1,60 @@
 import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2 as cv
 from tqdm import tqdm
+from torch.utils.data import Dataset
 
 from . import pose_utils
+
+
+class MeshRender(Dataset):
+    def __init__(self, mesh, poses, intrinsics, height, width, mask) -> None:
+        self.poses = pose_utils.invert_poses(poses)
+        self.n = len(poses)
+        self.scale = None
+
+        self.intrinsics = o3d.camera.PinholeCameraIntrinsic(width, height, intrinsics)
+        self.mask = mask
+
+        mat = o3d.visualization.rendering.MaterialRecord()
+        mat.shader = "defaultLit"
+
+        self.scene = o3d.visualization.rendering.OffscreenRenderer(width, height)
+        self.scene.scene.set_background(np.array([0, 0, 0, 0]))
+        self.scene.scene.add_geometry("mesh", mesh, mat)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, index) -> any:
+        current_pose = self.poses[index]
+
+        # add light based on position #! this does not do anything idk why
+        # renderer_o3d.scene.scene.add_point_light(
+        #     "light", [1, 1, 1], p[:3, 3], 1e6, 1e4, True
+        # )
+        self.scene.setup_camera(self.intrinsics, current_pose)
+
+        depth_image = np.asarray(self.scene.render_to_depth_image(z_in_view_space=True))
+        depth_image = apply_mask(depth_image, self.mask)
+
+        if self.scale is not None:
+            normalized_image = display_depth_map(depth_image, scale=self.scale)
+        else:
+            normalized_image = display_depth_map(depth_image)
+        normalized_image = apply_mask(normalized_image, self.mask)
+
+        color_image = np.asarray(self.scene.render_to_image())
+        color_image = apply_mask(color_image, self.mask)
+
+        # remove light from scene to update in next render
+        # renderer_o3d.scene.scene.remove_light("light")
+
+        return color_image, depth_image, normalized_image
+
+    def set_scale(self, scale):
+        self.scale = scale
 
 
 def generate_renders(
@@ -16,67 +67,14 @@ def generate_renders(
     save_dir=None,
     idx_list=None,
 ):
-    """
-    Generate color and depth renders of mesh based on camera poses
+    mesh_render_list = MeshRender(mesh, poses, intrinsics, img_height, img_width, mask)
 
-    Args:
-        mesh: o3d triangle mesh
-        poses: n x 4 x 4 numpy array
-        intrinsics: 3 x 3 array of camera intrinsics from checkerboard calibration
-        img_width: int
-        img_height: int
-        save_dir: Path
+    if save_dir is not None:
+        print(f"Saving image renders...")
 
-    Returns:
-        depth_maps: np.array of depth values per pose
-        depth_display: np.array of normalized depth map for visualization
-        color_renders: image seen by camera
-    """
-    # set material
-    mat = o3d.visualization.rendering.MaterialRecord()
-    mat.shader = "defaultLit"
+        for idx in tqdm(range(len(mesh_render_list))):
+            color_img, _, depth_disp = mesh_render_list[idx]
 
-    # set up scene
-    renderer_o3d = o3d.visualization.rendering.OffscreenRenderer(img_width, img_height)
-    renderer_o3d.scene.set_background(np.array([0, 0, 0, 0]))
-    renderer_o3d.scene.add_geometry("mesh", mesh, mat)
-
-    # set camera properties
-    intrinsics_o3d = o3d.camera.PinholeCameraIntrinsic(
-        img_width, img_height, intrinsics
-    )
-    inverted_poses = pose_utils.invert_poses(poses)[0:2]
-
-    depth_maps = []
-    depth_display = []
-    color_render = []
-    for idx, p in enumerate(tqdm(inverted_poses)):
-        renderer_o3d.setup_camera(intrinsics_o3d, p)
-
-        # add light based on position #! this does not do anything idk why
-        # renderer_o3d.scene.scene.add_point_light(
-        #     "light", [1, 1, 1], p[:3, 3], 1e6, 1e4, True
-        # )
-
-        # depth map with values
-        depth_image = np.asarray(renderer_o3d.render_to_depth_image())
-        depth_maps.append(depth_image)
-
-        # depth image for visualization
-        normalized_image = (depth_image - depth_image.min()) / (
-            depth_image.max() - depth_image.min()
-        )
-        depth_display.append(normalized_image)
-
-        # rendered color image
-        color_image = np.asarray(renderer_o3d.render_to_image())
-        color_render.append(color_image)
-
-        # remove light from scene to update in next render
-        # renderer_o3d.scene.scene.remove_light("light")
-
-        # save individual images (based on original seq idx values)
-        if save_dir is not None:
             depth_dir = save_dir / "depth"
             depth_dir.mkdir(parents=True, exist_ok=True)
 
@@ -90,10 +88,77 @@ def generate_renders(
                 depth_save = depth_dir / f"depth_{idx_list[idx]:06d}.png"
                 color_save = color_dir / f"color_{idx_list[idx]:06d}.png"
 
-            plt.imsave(str(depth_save), apply_mask(normalized_image, mask))
-            plt.imsave(str(color_save), apply_mask(color_image, mask))
+            plt.imsave(str(depth_save), depth_disp, mask)
+            plt.imsave(str(color_save), color_img, mask)
 
-    return np.asarray(color_render), np.asarray(depth_maps), np.asarray(depth_display)
+    return mesh_render_list
+
+
+def get_max_depth(mesh_render_list):
+    max_depth = -np.inf
+    for i in range(len(mesh_render_list)):
+        _, depth_img, _ = mesh_render_list[i]
+
+        if np.max(depth_img) > max_depth:
+            max_depth = np.max(depth_img)
+
+    return max_depth
+
+
+def display_depth_map(
+    depth_map, min_value=None, max_value=None, colormode=cv.COLORMAP_JET, scale=None
+):
+    if (min_value is None or max_value is None) and scale is None:
+        if len(depth_map[depth_map > 0]) > 0:
+            min_value = np.min(depth_map[depth_map > 0])
+        else:
+            min_value = 0.0
+
+        if max_value is None:
+            max_value = np.max(depth_map)
+    elif scale is not None:
+        min_value = 0.0
+        max_value = scale
+    else:
+        pass
+
+    depth_map_visualize = np.abs(
+        (depth_map - min_value) / (max_value - min_value + 1.0e-8) * 255
+    )
+    depth_map_visualize[depth_map_visualize > 255] = 255
+    depth_map_visualize[depth_map_visualize <= 0.0] = 0
+    depth_map_visualize = cv.applyColorMap(np.uint8(depth_map_visualize), colormode)
+
+    return depth_map_visualize
+
+
+def save_render_video(img_list, mesh_render_list, output_dir, desc):
+    assert len(img_list) == len(mesh_render_list)
+
+    ## scale to visible max depth
+    # max_depth = get_max_depth(mesh_render_list)
+    # mesh_render_list.set_scale(max_depth)
+
+    height, width, _ = mesh_render_list[0][0].shape
+
+    output_vid = cv.VideoWriter(
+        str(output_dir / f"{desc}_renders.mp4"),
+        cv.VideoWriter_fourcc(*"mp4v"),
+        15,
+        (width * 3, height),
+        True,
+    )
+
+    print(f"Writing video...")
+    for idx in tqdm(range(len(img_list))):
+        img = cv.imread(str(img_list[idx]))
+        render, _, depth = mesh_render_list[idx]
+        frame = np.concatenate([img, render, depth], axis=1)
+
+        output_vid.write(frame)
+    output_vid.release()
+
+    print(f"Saved render video to: {output_dir}.")
 
 
 def apply_mask(img, mask):

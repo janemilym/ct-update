@@ -26,17 +26,21 @@ def ct_update(input):
 
     output_dir = Path(args["output_dir"]).expanduser()
 
-    preop_depth_dir = output_dir / "preop_renders"
-    preop_depth_dir.mkdir(parents=True, exist_ok=True)
-    preop_depths = render_utils.generate_renders(
+    preop_render_dir = output_dir / "preop_renders"
+    preop_render_dir.mkdir(parents=True, exist_ok=True)
+    preop_renders = render_utils.generate_renders(
         mesh=seg,
         poses=preop_poses,
         intrinsics=intrinsics,
         img_width=preop_mask.shape[1],
         img_height=preop_mask.shape[0],
         mask=preop_mask,
-        save_dir=preop_depth_dir,
-        idx_list=preop_idxs,
+    )
+    render_utils.save_render_video(
+        img_list=preop_img_paths,
+        mesh_render_list=preop_renders,
+        output_dir=preop_render_dir,
+        desc="preop",
     )
 
     ## generate preop fused mesh based on CT
