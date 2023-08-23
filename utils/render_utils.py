@@ -12,6 +12,7 @@ def generate_renders(
     intrinsics,
     img_width,
     img_height,
+    mask,
     save_dir=None,
     idx_list=None,
 ):
@@ -71,7 +72,7 @@ def generate_renders(
         color_image = np.asarray(renderer_o3d.render_to_image())
         color_render.append(color_image)
 
-        # remove light before next render
+        # remove light from scene to update in next render
         # renderer_o3d.scene.scene.remove_light("light")
 
         # save individual images (based on original seq idx values)
@@ -89,10 +90,31 @@ def generate_renders(
                 depth_save = depth_dir / f"depth_{idx_list[idx]:06d}.png"
                 color_save = color_dir / f"color_{idx_list[idx]:06d}.png"
 
-            plt.imsave(str(depth_save), normalized_image)
-            plt.imsave(str(color_save), color_image)
+            plt.imsave(str(depth_save), apply_mask(normalized_image, mask))
+            plt.imsave(str(color_save), apply_mask(color_image, mask))
 
     return np.asarray(color_render), np.asarray(depth_maps), np.asarray(depth_display)
+
+
+def apply_mask(img, mask):
+    """
+    Apply mask to image
+
+    Args:
+        mask: grayscale or binary
+        image: color or grayscale
+    """
+    # convert to binary if grayscale
+    if mask.max() > 0:
+        mask[mask > 0] = 1
+
+    if len(img.shape) == len(mask.shape):
+        masked_img = img * mask
+    elif len(img.shape) == 3:
+        mask_rgb = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
+        masked_img = img * mask_rgb
+
+    return masked_img
 
 
 def surface_mesh_global_scale(surface_mesh):

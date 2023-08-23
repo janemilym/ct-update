@@ -32,8 +32,9 @@ def ct_update(input):
         mesh=seg,
         poses=preop_poses,
         intrinsics=intrinsics,
-        img_width=1920,
-        img_height=1080,
+        img_width=preop_mask.shape[1],
+        img_height=preop_mask.shape[0],
+        mask=preop_mask,
         save_dir=preop_depth_dir,
         idx_list=preop_idxs,
     )
