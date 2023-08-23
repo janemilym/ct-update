@@ -64,6 +64,7 @@ def subsample_poses(poses, indexes, interval=1):
     start_idx, end_idx = indexes
 
     selected_poses = []
+    idx_list = []
     for i, pose in enumerate(poses):
         if (
             (i - start_idx) % interval == 0
@@ -71,8 +72,9 @@ def subsample_poses(poses, indexes, interval=1):
             and (i) <= end_idx
         ):
             selected_poses.append(pose)
+            idx_list.append(i)
 
-    return np.asarray(selected_poses), 
+    return np.asarray(selected_poses), np.asarray(idx_list)
 
 
 def quaternion_matrix(quaternion):
