@@ -14,18 +14,16 @@ def ct_update(input):
     with open(input) as f:
         args = json.load(f)
 
-    intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
-        args["intraop_data"], pose_in_m=True
-    )
     intrinsics = data_utils.load_intrinsics(
         [float(i) for i in args["intrinsics"].split(",")]
     )
-
     output_dir = Path(args["output_dir"]).expanduser()
 
-    image_utils.extract_keypoints(
-        intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
-    )
+    preop_data = args["preop_data"]
+    intraop_data = args["intraop_data"]
+    # preop_depths = compute_preop_depths(preop_data, intrinsics, output_dir)
+
+    warp_intraop_to_preop(preop_data, intraop_data, output_dir)
 
     return
 
@@ -84,6 +82,17 @@ def compute_preop_depths(preop_json, intrinsics, output_dir=None):
     del preop_renders
 
     return preop_depths
+
+
+def warp_intraop_to_preop(preop_json, intraop_json, output_dir=None):
+    preop_img_paths, _, _, _, _ = extract_info(preop_json)
+    intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
+        intraop_json, pose_in_m=True
+    )
+    image_utils.extract_keypoints(
+        intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
+    )
+    return
 
 
 if __name__ == "__main__":
