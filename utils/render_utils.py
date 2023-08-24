@@ -9,10 +9,20 @@ from . import pose_utils
 
 
 class MeshRender(Dataset):
-    def __init__(self, mesh, poses, intrinsics, height, width, mask) -> None:
+    def __init__(
+        self,
+        mesh,
+        poses,
+        intrinsics,
+        height,
+        width,
+        mask,
+        near_plane=None,
+        far_plane=None,
+    ) -> None:
         self.poses = pose_utils.invert_poses(poses)
         self.n = len(poses)
-        self.scale = None
+        self.scale, _, _ = surface_mesh_global_scale(mesh)
 
         self.intrinsics = o3d.camera.PinholeCameraIntrinsic(width, height, intrinsics)
         self.mask = mask
@@ -23,6 +33,13 @@ class MeshRender(Dataset):
         self.scene = o3d.visualization.rendering.OffscreenRenderer(width, height)
         self.scene.scene.set_background(np.array([0, 0, 0, 0]))
         self.scene.scene.add_geometry("mesh", mesh, mat)
+
+        ## set camera FoV
+        near_plane = 1e-3 if near_plane is None else near_plane
+        far_plane = self.scale if far_plane is None else far_plane
+        self.scene.scene.camera.set_projection(
+            intrinsics, near_plane, far_plane, width, height
+        )
 
     def __len__(self):
         return self.n
@@ -37,12 +54,10 @@ class MeshRender(Dataset):
         self.scene.setup_camera(self.intrinsics, current_pose)
 
         depth_image = np.asarray(self.scene.render_to_depth_image(z_in_view_space=True))
+        depth_image = np.nan_to_num(depth_image, posinf=0.0, neginf=0.0)
         depth_image = apply_mask(depth_image, self.mask)
 
-        if self.scale is not None:
-            normalized_image = display_depth_map(depth_image, scale=self.scale)
-        else:
-            normalized_image = display_depth_map(depth_image)
+        normalized_image = display_depth_map(depth_image, scale=self.scale)
         normalized_image = apply_mask(normalized_image, self.mask)
 
         color_image = np.asarray(self.scene.render_to_image())
@@ -52,9 +67,6 @@ class MeshRender(Dataset):
         # renderer_o3d.scene.scene.remove_light("light")
 
         return color_image, depth_image, normalized_image
-
-    def set_scale(self, scale):
-        self.scale = scale
 
 
 def generate_renders(

@@ -14,11 +14,11 @@ def ct_update(input):
     with open(input) as f:
         args = json.load(f)
 
-    preop_img_paths, preop_mask, preop_poses, preop_idxs, seg = extract_info(
+    preop_img_paths, preop_mask, preop_poses, preop_idxs, preop_seg = extract_info(
         args["preop_data"]
     )
     intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
-        args["intraop_data"]
+        args["intraop_data"], pose_in_m=True
     )
     intrinsics = data_utils.load_intrinsics(
         [float(i) for i in args["intrinsics"].split(",")]
@@ -29,19 +29,34 @@ def ct_update(input):
     preop_render_dir = output_dir / "preop_renders"
     preop_render_dir.mkdir(parents=True, exist_ok=True)
     preop_renders = render_utils.generate_renders(
-        mesh=seg,
+        mesh=preop_seg,
         poses=preop_poses,
         intrinsics=intrinsics,
         img_width=preop_mask.shape[1],
         img_height=preop_mask.shape[0],
         mask=preop_mask,
     )
-    render_utils.save_render_video(
-        img_list=preop_img_paths,
-        mesh_render_list=preop_renders,
-        output_dir=preop_render_dir,
-        desc="preop",
-    )
+    # render_utils.save_render_video(
+    #     img_list=preop_img_paths,
+    #     mesh_render_list=preop_renders,
+    #     output_dir=preop_render_dir,
+    #     desc="preop",
+    # )
+
+    # intraop_renders = render_utils.generate_renders(
+    #     mesh=preop_seg,
+    #     poses=intraop_poses,
+    #     intrinsics=intrinsics,
+    #     img_width=intraop_mask.shape[1],
+    #     img_height=intraop_mask.shape[0],
+    #     mask=intraop_mask,
+    # )
+    # render_utils.save_render_video(
+    #     img_list=intraop_img_paths,
+    #     mesh_render_list=intraop_renders,
+    #     output_dir=output_dir,
+    #     desc="intraop",
+    # )
 
     ## generate preop fused mesh based on CT
     ## render depths at camera poses + depth fusion
@@ -49,7 +64,7 @@ def ct_update(input):
     return
 
 
-def extract_info(json_data):
+def extract_info(json_data, pose_in_m=False):
     base_dir = Path(json_data["base_dir"]).expanduser()
 
     img_dir = json_data["img_dir"] if "img_dir" in json_data else "images"
@@ -68,6 +83,8 @@ def extract_info(json_data):
         indexes=(json_data["start_idx"], json_data["end_idx"]),
         interval=json_data["interval"],
     )
+    if pose_in_m:
+        poses = pose_utils.scale_poses(poses, 1000)
 
     mask = cv.imread(str(base_dir / "undistorted_mask.bmp"), cv.IMREAD_GRAYSCALE)
 
