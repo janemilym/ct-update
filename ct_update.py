@@ -14,9 +14,6 @@ def ct_update(input):
     with open(input) as f:
         args = json.load(f)
 
-    preop_img_paths, preop_mask, preop_poses, preop_idxs, preop_seg = extract_info(
-        args["preop_data"]
-    )
     intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
         args["intraop_data"], pose_in_m=True
     )
@@ -26,40 +23,9 @@ def ct_update(input):
 
     output_dir = Path(args["output_dir"]).expanduser()
 
-    preop_render_dir = output_dir / "preop_renders"
-    preop_render_dir.mkdir(parents=True, exist_ok=True)
-    preop_renders = render_utils.generate_renders(
-        mesh=preop_seg,
-        poses=preop_poses,
-        intrinsics=intrinsics,
-        img_width=preop_mask.shape[1],
-        img_height=preop_mask.shape[0],
-        mask=preop_mask,
+    image_utils.extract_keypoints(
+        intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
     )
-    # render_utils.save_render_video(
-    #     img_list=preop_img_paths,
-    #     mesh_render_list=preop_renders,
-    #     output_dir=preop_render_dir,
-    #     desc="preop",
-    # )
-
-    # intraop_renders = render_utils.generate_renders(
-    #     mesh=preop_seg,
-    #     poses=intraop_poses,
-    #     intrinsics=intrinsics,
-    #     img_width=intraop_mask.shape[1],
-    #     img_height=intraop_mask.shape[0],
-    #     mask=intraop_mask,
-    # )
-    # render_utils.save_render_video(
-    #     img_list=intraop_img_paths,
-    #     mesh_render_list=intraop_renders,
-    #     output_dir=output_dir,
-    #     desc="intraop",
-    # )
-
-    ## generate preop fused mesh based on CT
-    ## render depths at camera poses + depth fusion
 
     return
 
@@ -92,6 +58,32 @@ def extract_info(json_data, pose_in_m=False):
     assert len(img_list) == len(poses)
 
     return img_list, mask, poses, idxs, seg
+
+
+def compute_preop_depths(preop_json, intrinsics, output_dir=None):
+    preop_img_paths, preop_mask, preop_poses, _, preop_seg = extract_info(
+        preop_json["preop_data"]
+    )
+
+    preop_renders, preop_depths = render_utils.generate_renders(
+        mesh=preop_seg,
+        poses=preop_poses,
+        intrinsics=intrinsics,
+        img_width=preop_mask.shape[1],
+        img_height=preop_mask.shape[0],
+        mask=preop_mask,
+    )
+
+    if output_dir is not None:
+        render_utils.save_render_video(
+            img_list=preop_img_paths,
+            mesh_render_list=preop_renders,
+            output_dir=output_dir,
+            desc="preop",
+        )
+    del preop_renders
+
+    return preop_depths
 
 
 if __name__ == "__main__":

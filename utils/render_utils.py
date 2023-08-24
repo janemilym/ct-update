@@ -6,7 +6,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset
 
 from . import pose_utils
-
+from . import image_utils
 
 class MeshRender(Dataset):
     def __init__(
@@ -55,13 +55,13 @@ class MeshRender(Dataset):
 
         depth_image = np.asarray(self.scene.render_to_depth_image(z_in_view_space=True))
         depth_image = np.nan_to_num(depth_image, posinf=0.0, neginf=0.0)
-        depth_image = apply_mask(depth_image, self.mask)
+        depth_image = image_utils.apply_mask(depth_image, self.mask)
 
         normalized_image = display_depth_map(depth_image, scale=self.scale)
-        normalized_image = apply_mask(normalized_image, self.mask)
+        normalized_image = image_utils.apply_mask(normalized_image, self.mask)
 
         color_image = np.asarray(self.scene.render_to_image())
-        color_image = apply_mask(color_image, self.mask)
+        color_image = image_utils.apply_mask(color_image, self.mask)
 
         # remove light from scene to update in next render
         # renderer_o3d.scene.scene.remove_light("light")
@@ -81,12 +81,12 @@ def generate_renders(
 ):
     mesh_render_list = MeshRender(mesh, poses, intrinsics, img_height, img_width, mask)
 
-    if save_dir is not None:
-        print(f"Saving image renders...")
+    depth_maps = []
+    for idx in tqdm(range(len(mesh_render_list))):
+        color_img, depth_map, depth_disp = mesh_render_list[idx]
+        depth_maps.append(depth_map)
 
-        for idx in tqdm(range(len(mesh_render_list))):
-            color_img, _, depth_disp = mesh_render_list[idx]
-
+        if save_dir is not None:
             depth_dir = save_dir / "depth"
             depth_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,7 +103,7 @@ def generate_renders(
             plt.imsave(str(depth_save), depth_disp, mask)
             plt.imsave(str(color_save), color_img, mask)
 
-    return mesh_render_list
+    return mesh_render_list, depth_maps
 
 
 def get_max_depth(mesh_render_list):
@@ -171,27 +171,6 @@ def save_render_video(img_list, mesh_render_list, output_dir, desc):
     output_vid.release()
 
     print(f"Saved render video to: {output_dir}.")
-
-
-def apply_mask(img, mask):
-    """
-    Apply mask to image
-
-    Args:
-        mask: grayscale or binary
-        image: color or grayscale
-    """
-    # convert to binary if grayscale
-    if mask.max() > 0:
-        mask[mask > 0] = 1
-
-    if len(img.shape) == len(mask.shape):
-        masked_img = img * mask
-    elif len(img.shape) == 3:
-        mask_rgb = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
-        masked_img = img * mask_rgb
-
-    return masked_img
 
 
 def surface_mesh_global_scale(surface_mesh):
