@@ -1,5 +1,7 @@
 # Directories
-data/*
+data
+test_images
+*.jpg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

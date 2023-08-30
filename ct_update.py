@@ -85,13 +85,49 @@ def compute_preop_depths(preop_json, intrinsics, output_dir=None):
 
 
 def warp_intraop_to_preop(preop_json, intraop_json, output_dir=None):
-    preop_img_paths, _, _, _, _ = extract_info(preop_json)
+    preop_img_paths, preop_mask, _, _, _ = extract_info(preop_json)
     intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
         intraop_json, pose_in_m=True
     )
-    image_utils.extract_keypoints(
-        intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
+    # preop_kps = image_utils.extract_keypoints(
+    #     preop_img_paths, mask=preop_mask, output_dir=output_dir, desc="preop"
+    # )
+    # intraop_kps = image_utils.extract_keypoints(
+    #     intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
+    # )
+
+    #! debugging homography with SIFT
+    preop_kps, preop_des = image_utils.extract_keypoints(
+        preop_img_paths[725:730], mask=preop_mask
     )
+    intraop_kps, intraop_des = image_utils.extract_keypoints(
+        intraop_img_paths[78:82], mask=intraop_mask
+    )
+
+    src_idx = 80
+    dst_idx = 727
+    src_img_path = intraop_img_paths[src_idx]
+    dst_img_path = preop_img_paths[dst_idx]
+    src_img = cv.imread(str(src_img_path))
+    dst_img = cv.imread(str(dst_img_path))
+
+    src_kps, dst_kps = image_utils.match_keypoints(
+        intraop_kps[src_img_path.stem],
+        intraop_des[src_img_path.stem],
+        preop_kps[dst_img_path.stem],
+        preop_des[dst_img_path.stem],
+    )
+
+    # src_kps = preop_kps[src_img_path.stem]
+    # dst_kps = intraop_kps[dst_img_path.stem]
+
+    test_warped = image_utils.warp_image(
+        src_img_path, dst_img_path, src_kps, dst_kps, preop_mask
+    )
+    cv.imwrite("warped.jpg", test_warped)
+    overlay = cv.addWeighted(dst_img, 0.5, test_warped, 0.5, 0.0)
+    cv.imwrite("overlay.jpg", overlay)
+
     return
 
 
