@@ -11,6 +11,7 @@ def extract_keypoints(img_path_list, mask, output_dir=None, desc=None):
 
     kp_imgs = []
     keypoints = dict()
+    descriptors = dict()
     print("Extracting SIFT keypoints...")
     for img_path in tqdm(img_path_list):
         img = cv.imread(str(img_path))
@@ -20,12 +21,43 @@ def extract_keypoints(img_path_list, mask, output_dir=None, desc=None):
         kp_img = cv.drawKeypoints(img, kps, None, color=(0, 255, 0))
         kp_imgs.append(kp_img)
 
-        keypoints[img_path.stem] = [k.pt for k in kps]
+        # keypoints[img_path.stem] = [k.pt for k in kps]
+        keypoints[img_path.stem] = kps
+        descriptors[img_path.stem] = des
 
     if output_dir is not None:
         save_keypoint_video(kp_imgs, output_dir, desc)
 
-    return keypoints
+    return keypoints, descriptors
+
+
+def match_keypoints(src_kps, src_des, dst_kps, dst_des):
+    bf = cv.BFMatcher()
+    matches = bf.match(src_des, dst_des)
+    matches = sorted(matches, key=lambda val: val.distance)
+
+    new_src_kps = []
+    new_dst_kps = []
+    for m in matches:
+        src_idx = m.queryIdx
+        dst_idx = m.trainIdx
+
+        new_src_kps.append(src_kps[src_idx].pt)
+        new_dst_kps.append(dst_kps[dst_idx].pt)
+
+    return np.asarray(new_src_kps), np.asarray(new_dst_kps)
+
+
+def warp_image(src_img_path, dst_img_path, src_kps, dst_kps, dst_mask, threshold=10.0):
+    src_img = cv.imread(str(src_img_path))
+    dst_img = cv.imread(str(dst_img_path))
+
+    height, width, _ = dst_img.shape
+    h, _ = cv.findHomography(src_kps, dst_kps, cv.RANSAC, threshold)
+    warped = cv.warpPerspective(src_img, h, (width, height))
+    warped = apply_mask(warped, dst_mask)
+
+    return warped
 
 
 def apply_mask(img, mask):
