@@ -3,21 +3,13 @@ import cv2 as cv
 from tqdm import tqdm
 
 
-def extract_keypoints(img_path_list, mask, output_dir=None, desc=None):
-    ## eroding mask to eliminate kps at border
-    new_mask = cv.erode(
-        mask, cv.getStructuringElement(cv.MORPH_ELLIPSE, (60, 60)), iterations=3
-    )
-
+def extract_keypoints_dict(img_path_list, mask=None, output_dir=None, desc=None):
     kp_imgs = []
     keypoints = dict()
     descriptors = dict()
-    print("Extracting SIFT keypoints...")
+    print("Extracting SIFT keypoints from sequence...")
     for img_path in tqdm(img_path_list):
-        img = cv.imread(str(img_path))
-        sift = cv.SIFT_create()
-        kps, des = sift.detectAndCompute(img, mask=new_mask)
-
+        img, kps, des = extract_keypoints(img_path, mask=mask)
         kp_img = cv.drawKeypoints(img, kps, None, color=(0, 255, 0))
         kp_imgs.append(kp_img)
 
@@ -29,6 +21,19 @@ def extract_keypoints(img_path_list, mask, output_dir=None, desc=None):
         save_keypoint_video(kp_imgs, output_dir, desc)
 
     return keypoints, descriptors
+
+
+def extract_keypoints(img_path, mask=None):
+    if mask is not None:
+        ## eroding mask to eliminate kps at border
+        mask = cv.erode(
+            mask, cv.getStructuringElement(cv.MORPH_ELLIPSE, (60, 60)), iterations=3
+        )
+    img = cv.imread(str(img_path))
+    sift = cv.SIFT_create()
+    kps, des = sift.detectAndCompute(img, mask=mask)
+
+    return img, kps, des
 
 
 def match_keypoints(src_kps, src_des, dst_kps, dst_des):
@@ -44,13 +49,54 @@ def match_keypoints(src_kps, src_des, dst_kps, dst_des):
 
         new_src_kps.append(src_kps[src_idx].pt)
         new_dst_kps.append(dst_kps[dst_idx].pt)
+    assert len(new_src_kps) == len(new_dst_kps)
 
-    return np.asarray(new_src_kps), np.asarray(new_dst_kps)
+    return matches, np.asarray(new_src_kps), np.asarray(new_dst_kps)
 
 
-def warp_image(src_img_path, dst_img_path, src_kps, dst_kps, dst_mask, threshold=10.0):
-    src_img = cv.imread(str(src_img_path))
-    dst_img = cv.imread(str(dst_img_path))
+def find_best_matches(
+    src_img_paths, dst_img_paths, src_mask=None, dst_mask=None, output_dir=None
+):
+    """
+    Finds indexes of source img paths with largest number of matches to each dest img path
+    """
+    src_kps, src_des = extract_keypoints_dict(src_img_paths, mask=src_mask)
+    dst_kps, dst_des = extract_keypoints_dict(dst_img_paths[0:5], mask=dst_mask)
+
+    print("Finding best matches...")
+    src_idxs = []
+    for dst_path in tqdm(dst_img_paths[0:5]):
+        matches = []
+        for src_path in src_img_paths:
+            n, _, _ = match_keypoints(
+                src_kps[src_path.stem],
+                src_des[src_path.stem],
+                dst_kps[dst_path.stem],
+                dst_des[dst_path.stem],
+            )
+            matches.append(n)
+        matches = np.asarray(matches)
+
+        src_idxs.append(np.argmax(matches))
+        breakpoint()
+    if output_dir is not None:
+        img_list = []
+
+        for idx, img_path in zip(src_idxs, dst_img_paths):
+            dst_img = cv.imread(str(img_path))
+            src_img = cv.imread(str(src_img_paths[idx]))
+
+            tmp_img = cv.hconcat([src_img, dst_img])
+            img_list.append(tmp_img)
+
+        save_video(img_list, save_path=str(output_dir / "matched_frames.mp4"))
+
+    return src_idxs
+
+
+def warp_image(src_img, dst_img, src_kps, dst_kps, dst_mask, threshold=10.0):
+    # src_img = cv.imread(str(src_img_path))
+    # dst_img = cv.imread(str(dst_img_path))
 
     height, width, _ = dst_img.shape
     h, _ = cv.findHomography(src_kps, dst_kps, cv.RANSAC, threshold)
@@ -99,3 +145,22 @@ def save_keypoint_video(kp_imgs, output_dir, desc=None):
     output_vid.release()
 
     print(f"Saved keypoint video to: {output_dir}.")
+
+
+def save_video(img_list, save_path="video.mp4"):
+    height, width, _ = img_list[0].shape
+
+    output_vid = cv.VideoWriter(
+        str(save_path),
+        cv.VideoWriter_fourcc(*"mp4v"),
+        15,
+        (width, height),
+        True,
+    )
+
+    print(f"Writing video...")
+    for img in tqdm(img_list):
+        output_vid.write(img)
+    output_vid.release()
+
+    print(f"Saved video to: {save_path}")

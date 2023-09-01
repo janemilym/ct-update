@@ -5,6 +5,8 @@ from pathlib import Path
 import pytransform3d.transformations as pt
 import open3d as o3d
 
+from . import error_utils
+
 
 def plot_and_save_trajectory(
     poses,
@@ -66,11 +68,7 @@ def subsample_poses(poses, indexes, interval=1):
     selected_poses = []
     idx_list = []
     for i, pose in enumerate(poses):
-        if (
-            (i - start_idx) % interval == 0
-            and i >= start_idx
-            and (i) <= end_idx
-        ):
+        if (i - start_idx) % interval == 0 and i >= start_idx and (i) <= end_idx:
             selected_poses.append(pose)
             idx_list.append(i)
 
@@ -167,3 +165,29 @@ def save_poses(poses, save_path):
     """
     np.savetxt(save_path, poses.flatten(), delimiter=",")
     print(f"Camera poses saved to: {save_path}")
+
+
+def find_nearest_pose(query, poses):
+    """
+    Finds the nearest pose in the sequence to the query
+
+    ARGS
+    query: 4 x 4 query camera trajectory
+    poses: n x 4 x 4 camera trajectory sequence
+    """
+
+    seq_pos = poses[:, :3, 3]
+    q_pos = query[:3, 3]
+
+    dist = np.linalg.norm(seq_pos - q_pos, axis=1)
+    sorted_idxs = np.argsort(dist)
+
+    ## check view
+    axis_errs = []
+    for i in sorted_idxs:
+        check = error_utils.axis_angle_err(poses[i, :3, :3], query[:3, :3])
+        axis_errs.append(np.rad2deg(check))
+
+    breakpoint()
+
+    return np.argmin(dist)

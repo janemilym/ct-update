@@ -1,5 +1,6 @@
 import numpy as np
 
+
 ## based on https://arxiv.org/pdf/1406.2283.pdf
 def scale_invariant_MSE(depth_map_1, depth_map_2):
     assert depth_map_1.shape == depth_map_2.shape
@@ -13,3 +14,10 @@ def scale_invariant_MSE(depth_map_1, depth_map_2):
     #     breakpoint()
 
     return result, n
+
+
+def axis_angle_err(r1, r2):
+    rot = r1 @ np.transpose(r2)
+    rot_err = np.arccos((np.trace(rot) - 1) / 2)
+
+    return rot_err

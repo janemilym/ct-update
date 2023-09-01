@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from . import pose_utils
 from . import image_utils
 
+
 class MeshRender(Dataset):
     def __init__(
         self,
@@ -81,12 +82,12 @@ def generate_renders(
 ):
     mesh_render_list = MeshRender(mesh, poses, intrinsics, img_height, img_width, mask)
 
-    depth_maps = []
-    for idx in tqdm(range(len(mesh_render_list))):
-        color_img, depth_map, depth_disp = mesh_render_list[idx]
-        depth_maps.append(depth_map)
+    if save_dir is not None:
+        # depth_maps = []
+        for idx in tqdm(range(len(mesh_render_list))):
+            color_img, depth_map, depth_disp = mesh_render_list[idx]
+            # depth_maps.append(depth_map)
 
-        if save_dir is not None:
             depth_dir = save_dir / "depth"
             depth_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,7 +104,7 @@ def generate_renders(
             plt.imsave(str(depth_save), depth_disp, mask)
             plt.imsave(str(color_save), color_img, mask)
 
-    return mesh_render_list, depth_maps
+    return mesh_render_list
 
 
 def get_max_depth(mesh_render_list):

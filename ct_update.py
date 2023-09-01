@@ -3,9 +3,13 @@ import json
 import open3d as o3d
 import cv2 as cv
 from pathlib import Path
+from tqdm import tqdm
 
 # local
 from utils import *
+
+SRC_IDX = 727
+DST_IDX = 80
 
 
 @click.command()
@@ -21,9 +25,26 @@ def ct_update(input):
 
     preop_data = args["preop_data"]
     intraop_data = args["intraop_data"]
-    # preop_depths = compute_preop_depths(preop_data, intrinsics, output_dir)
 
-    warp_intraop_to_preop(preop_data, intraop_data, output_dir)
+    preop_img_paths, preop_mask, _, _, _ = extract_info(preop_data)
+    intraop_img_paths, intraop_mask, _, _, _ = extract_info(intraop_data)
+
+    # preop_idxs = image_utils.find_best_matches(
+    #     src_img_paths=preop_img_paths,
+    #     dst_img_paths=intraop_img_paths,
+    #     src_mask=preop_mask,
+    #     dst_mask=intraop_mask,
+    #     output_dir=output_dir,
+    # )
+
+    # preop_idxs = get_closest_preop(preop_data, intraop_data)
+    preop_depths = compute_preop_depths(preop_data, intrinsics, idxs=[727])
+
+    # ct depths at intraop frames
+    warp_preop_to_intraop(preop_data, intraop_data, preop_depths, output_dir)
+
+    img = cv.imread(str(intraop_img_paths[DST_IDX]))
+    cv.imwrite(f"test_intraop_{intraop_img_paths[DST_IDX].stem}.png", img)
 
     return
 
@@ -58,12 +79,24 @@ def extract_info(json_data, pose_in_m=False):
     return img_list, mask, poses, idxs, seg
 
 
-def compute_preop_depths(preop_json, intrinsics, output_dir=None):
-    preop_img_paths, preop_mask, preop_poses, _, preop_seg = extract_info(
-        preop_json["preop_data"]
-    )
+def get_closest_preop(preop_json, intraop_json):
+    #! does not work
+    ## may refine later to return multiple preop idxs per intraop pose
+    _, _, preop_poses, _, _ = extract_info(preop_json)
+    _, _, intraop_poses, _, _ = extract_info(intraop_json, pose_in_m=True)
 
-    preop_renders, preop_depths = render_utils.generate_renders(
+    preop_idxs = []
+    for pose in intraop_poses:
+        idx_tmp = pose_utils.find_nearest_pose(pose, preop_poses)
+        preop_idxs.append(idx_tmp)
+
+    return preop_idxs
+
+
+def compute_preop_depths(preop_json, intrinsics, idxs, output_dir=None):
+    preop_img_paths, preop_mask, preop_poses, _, preop_seg = extract_info(preop_json)
+
+    preop_renders = render_utils.generate_renders(
         mesh=preop_seg,
         poses=preop_poses,
         intrinsics=intrinsics,
@@ -72,6 +105,12 @@ def compute_preop_depths(preop_json, intrinsics, output_dir=None):
         mask=preop_mask,
     )
 
+    print("Generating preop depth renders...")
+    preop_depths = dict()
+    for i in tqdm(idxs):
+        color, depth, depth_disp = preop_renders[i]
+        preop_depths[i] = depth_disp
+
     if output_dir is not None:
         render_utils.save_render_video(
             img_list=preop_img_paths,
@@ -79,54 +118,92 @@ def compute_preop_depths(preop_json, intrinsics, output_dir=None):
             output_dir=output_dir,
             desc="preop",
         )
-    del preop_renders
 
     return preop_depths
 
 
-def warp_intraop_to_preop(preop_json, intraop_json, output_dir=None):
+def warp_preop_to_intraop(preop_json, intraop_json, preop_depths, output_dir=None):
     preop_img_paths, preop_mask, _, _, _ = extract_info(preop_json)
-    intraop_img_paths, intraop_mask, intraop_poses, intraop_idxs, _ = extract_info(
+    intraop_img_paths, intraop_mask, _, _, _ = extract_info(
         intraop_json, pose_in_m=True
     )
-    # preop_kps = image_utils.extract_keypoints(
-    #     preop_img_paths, mask=preop_mask, output_dir=output_dir, desc="preop"
+    # selected_preop_imgs = [preop_img_paths[i] for i in set(preop_idxs)]
+
+    # homography with SIFT
+    # preop_kps, preop_des = image_utils.extract_keypoints_dict(
+    #     selected_preop_imgs, mask=preop_mask
     # )
-    # intraop_kps = image_utils.extract_keypoints(
-    #     intraop_img_paths, mask=intraop_mask, output_dir=output_dir, desc="intraop"
+    # intraop_kps, intraop_des = image_utils.extract_keypoints_dict(
+    #     intraop_img_paths, mask=intraop_mask
     # )
 
-    #! debugging homography with SIFT
-    preop_kps, preop_des = image_utils.extract_keypoints(
-        preop_img_paths[725:730], mask=preop_mask
-    )
-    intraop_kps, intraop_des = image_utils.extract_keypoints(
-        intraop_img_paths[78:82], mask=intraop_mask
-    )
+    # print("Warping preop to intraop...")
+    # test_imgs = []
+    # assert len(preop_idxs) == len(intraop_img_paths)
+    # for dst_idx in tqdm(range(len(intraop_img_paths))):
+    #     src_idx = preop_idxs[dst_idx]
 
-    src_idx = 80
-    dst_idx = 727
-    src_img_path = intraop_img_paths[src_idx]
-    dst_img_path = preop_img_paths[dst_idx]
+    #     src_img_path = preop_img_paths[src_idx]
+    #     dst_img_path = intraop_img_paths[dst_idx]
+
+    #     src_kps, dst_kps = image_utils.match_keypoints(
+    #         preop_kps[src_img_path.stem],
+    #         preop_des[src_img_path.stem],
+    #         intraop_kps[dst_img_path.stem],
+    #         intraop_des[dst_img_path.stem],
+    #     )
+    #     warped, dst_img = image_utils.warp_image(
+    #         src_img_path, dst_img_path, src_kps, dst_kps, intraop_mask
+    #     )
+
+    #     img_tmp = cv.hconcat([warped, dst_img])
+
+    #     # src_img = cv.imread(str(src_img_path))
+    #     # dst_img = cv.imread(str(dst_img_path))
+    #     # img_tmp = cv.hconcat([src_img, dst_img])
+
+    #     test_imgs.append(img_tmp)
+
+    # image_utils.save_video(test_imgs, str(output_dir / "warped.mp4"))
+
+    src_img_path = preop_img_paths[SRC_IDX]
+    dst_img_path = intraop_img_paths[DST_IDX]
     src_img = cv.imread(str(src_img_path))
     dst_img = cv.imread(str(dst_img_path))
 
-    src_kps, dst_kps = image_utils.match_keypoints(
-        intraop_kps[src_img_path.stem],
-        intraop_des[src_img_path.stem],
-        preop_kps[dst_img_path.stem],
-        preop_des[dst_img_path.stem],
+    _, preop_kps, preop_des = image_utils.extract_keypoints(
+        src_img_path, mask=preop_mask
+    )
+    _, intra_kps, intra_des = image_utils.extract_keypoints(
+        dst_img_path, mask=intraop_mask
     )
 
-    # src_kps = preop_kps[src_img_path.stem]
-    # dst_kps = intraop_kps[dst_img_path.stem]
+    matches, src_kps, dst_kps = image_utils.match_keypoints(
+        src_kps=preop_kps, src_des=preop_des, dst_kps=intra_kps, dst_des=intra_des
+    )
 
+    match_img = cv.drawMatches(
+        src_img,
+        preop_kps,
+        dst_img,
+        intra_kps,
+        matches[:50],
+        None,
+        matchColor=(0, 255, 0),
+        singlePointColor=(0, 255, 0),
+    )
+    cv.imwrite("test_correspondences.png", match_img)
     test_warped = image_utils.warp_image(
-        src_img_path, dst_img_path, src_kps, dst_kps, preop_mask
+        src_img, dst_img, src_kps, dst_kps, intraop_mask
     )
-    cv.imwrite("warped.jpg", test_warped)
+    cv.imwrite("test_warped.png", test_warped)
     overlay = cv.addWeighted(dst_img, 0.5, test_warped, 0.5, 0.0)
-    cv.imwrite("overlay.jpg", overlay)
+    cv.imwrite("test_overlay.png", overlay)
+
+    warped_depth = image_utils.warp_image(
+        preop_depths[SRC_IDX], dst_img, src_kps, dst_kps, intraop_mask
+    )
+    cv.imwrite("test_warped_depth.png", warped_depth)
 
     return
 
