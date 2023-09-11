@@ -42,6 +42,8 @@ class MeshRender(Dataset):
             intrinsics, near_plane, far_plane, width, height
         )
 
+        self.use_mask = True
+
     def __len__(self):
         return self.n
 
@@ -56,18 +58,23 @@ class MeshRender(Dataset):
 
         depth_image = np.asarray(self.scene.render_to_depth_image(z_in_view_space=True))
         depth_image = np.nan_to_num(depth_image, posinf=0.0, neginf=0.0)
-        depth_image = image_utils.apply_mask(depth_image, self.mask)
 
         normalized_image = display_depth_map(depth_image, scale=self.scale)
-        normalized_image = image_utils.apply_mask(normalized_image, self.mask)
 
         color_image = np.asarray(self.scene.render_to_image())
-        color_image = image_utils.apply_mask(color_image, self.mask)
 
         # remove light from scene to update in next render
         # renderer_o3d.scene.scene.remove_light("light")
 
+        if self.use_mask:
+            depth_image = image_utils.apply_mask(depth_image, self.mask)
+            normalized_image = image_utils.apply_mask(normalized_image, self.mask)
+            color_image = image_utils.apply_mask(color_image, self.mask)
+
         return color_image, depth_image, normalized_image
+
+    def set_mask_usage(self, use_mask):
+        self.use_mask = use_mask
 
 
 def generate_renders(
