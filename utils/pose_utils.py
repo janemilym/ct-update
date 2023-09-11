@@ -180,14 +180,14 @@ def find_nearest_pose(query, poses):
     q_pos = query[:3, 3]
 
     dist = np.linalg.norm(seq_pos - q_pos, axis=1)
-    sorted_idxs = np.argsort(dist)
+    # sorted_idxs = np.argsort(dist)
 
-    ## check view
-    axis_errs = []
-    for i in sorted_idxs:
-        check = error_utils.axis_angle_err(poses[i, :3, :3], query[:3, :3])
-        axis_errs.append(np.rad2deg(check))
+    # ## check view
+    # axis_errs = []
+    # for i in sorted_idxs:
+    #     check = error_utils.axis_angle_err(poses[i, :3, :3], query[:3, :3])
+    #     axis_errs.append(np.rad2deg(check))
 
-    breakpoint()
+    # breakpoint()
 
     return np.argmin(dist)
