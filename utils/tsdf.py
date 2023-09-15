@@ -139,7 +139,8 @@ class TSDFVolume(object):
                                     float * other_params,
                                     float * color_im,
                                     float * depth_im,
-                                    float * std_im) {
+                                    float * std_im,
+                                    float * mask) {
             // Get voxel index
             int gpu_loop_idx = (int) other_params[0];
             int max_threads_per_block = blockDim.x;
@@ -182,6 +183,7 @@ class TSDFVolume(object):
             // Skip invalid depth
             float depth_value = depth_im[pixel_y*im_w+pixel_x];
             float std_value = std_im[pixel_y*im_w + pixel_x];
+            // This was modified to assume all values are certain (using CT ground-truth)
             //if (depth_value <= 0 || std_value <= 0) {
             //    return;
             //}
@@ -197,10 +199,23 @@ class TSDFVolume(object):
             float dist = fmin(1.0f,depth_diff/trunc_margin);
             float w_old = weight_vol[voxel_idx];
             float obs_weight = other_params[5];
+            // TESTING HERE: USING MASK
+            float invalid = mask[pixel_y * im_w + pixel_x];
+            if (invalid > 0) {
+                //tsdf_vol[voxel_idx] = 0;
+                //weight_vol[voxel_idx] = 0;
+                w_old = 0;
+                dist = 0;
+                //obs_weight = 0.000001;
+            }
             float w_new = w_old + obs_weight;
             tsdf_vol[voxel_idx] = (tsdf_vol[voxel_idx] * w_old + dist * obs_weight) / w_new;
             weight_vol[voxel_idx] = w_new;
             // Integrate color
+            if (invalid > 0) {
+                color_vol[voxel_idx] = 0;
+                return;
+            }
             float new_color = color_im[pixel_y * im_w + pixel_x];
             float new_b = floorf(new_color / (256 * 256));
             float new_g = floorf((new_color - new_b * 256 * 256) / 256);
@@ -258,6 +273,7 @@ class TSDFVolume(object):
         min_depth,
         std_im,
         obs_weight=1.0,
+        mask=None,
     ):
         im_h = depth_im.shape[0]
         im_w = depth_im.shape[1]
@@ -267,6 +283,9 @@ class TSDFVolume(object):
         color_im = np.floor(
             color_im[:, :, 2] * 256 * 256 + color_im[:, :, 1] * 256 + color_im[:, :, 0]
         )
+
+        if mask is None:
+            mask = np.zeros_like(depth_im)
 
         # integrate voxel volume (calls CUDA kernel)
         for gpu_loop_idx in range(self._n_gpu_loops):
@@ -296,6 +315,7 @@ class TSDFVolume(object):
                 cuda.InOut(color_im.reshape(-1).astype(np.float32)),
                 cuda.InOut(depth_im.reshape(-1).astype(np.float32)),
                 cuda.InOut(std_im.reshape(-1).astype(np.float32)),
+                cuda.InOut(mask.reshape(-1).astype(np.float32)),
                 block=(self._max_gpu_threads_per_block, 1, 1),
                 grid=(
                     int(self._max_gpu_grid_dim[0]),

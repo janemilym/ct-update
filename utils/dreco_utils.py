@@ -11,7 +11,13 @@ def downsample_and_crop_mask(
     end_h_index = downsampled_mask.shape[0]
     end_w_index = downsampled_mask.shape[1]
     # divide is related to the pooling times of the teacher model
-    indexes = np.where(downsampled_mask >= 200)
+    if np.max(downsampled_mask > 1):
+        indexes = np.where(downsampled_mask >= 200)
+    elif np.max(downsampled_mask == 1):
+        indexes = np.where(downsampled_mask == 1)
+    else:
+        print("mask is broken")
+        exit(0)
     h = indexes[0].max() - indexes[0].min()
     w = indexes[1].max() - indexes[1].min()
 

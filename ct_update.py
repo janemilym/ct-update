@@ -54,25 +54,26 @@ def ct_update(input):
         poses=preop_poses,
         mask=preop_mask,
     )
-    tsdf_vol = build_tsdf(
+    tsdf_vol, overall_mean_depth_value = build_tsdf(
         render_list=preop_renders,
         img_path_list=preop_img_paths,
         poses=preop_poses,
         intrinsics=intrinsics,
         mask=preop_mask,
     )
+    del preop_renders
     verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
     tsdf.meshwrite(
         str(output_dir / "initial_fused_mesh.ply"), verts, faces, -norms, colors
     )
 
     # * preop CT renders at intraop poses
-    # intraop_renders = generate_renders(
-    #     preop_seg, intrinsics, intraop_img_paths, intraop_poses, intraop_mask
-    # )
+    intraop_renders = generate_renders(
+        preop_seg, intrinsics, intraop_img_paths, intraop_poses, intraop_mask
+    )
 
     # * get indexes of preop keyframes corresponding to intraop seq
-    # preop_key_idxs = get_closest_preop(preop_poses, intraop_poses)
+    preop_key_idxs = get_closest_preop(preop_poses, intraop_poses)
     # save_closest_preop_vid(
     #     preop_img_paths, preop_key_idxs, intraop_img_paths, output_dir
     # )
@@ -84,16 +85,94 @@ def ct_update(input):
     # compare_intraop_renders(intraop_dir, intraop_img_paths, intraop_renders, intraop_mask, output_dir)
 
     # * compare warped preop CT to intraop poses with est depth
-    # compare_warped_intraop(
-    #     preop_data,
-    #     preop_img_paths,
-    #     intrinsics,
-    #     preop_key_idxs,
-    #     intraop_dir,
-    #     intraop_img_paths,
-    #     intraop_mask,
-    #     output_dir,
-    # )
+    intraop_max_depth = get_max_depth_fr_renders(intraop_renders)
+    del intraop_renders
+    depth_errs, warped_depth_maps = compare_warped_intraop(
+        preop_data,
+        preop_img_paths,
+        intrinsics,
+        preop_key_idxs,
+        intraop_dir,
+        intraop_img_paths,
+        intraop_mask,
+        intraop_max_depth,
+        output_dir,
+    )
+
+    # # ! MANUALLY SELECTED - STABLE WARPING
+    IDXS = (28, 66)
+    change_masks = extract_change_mask(depth_errs, idxs=IDXS, output_dir=output_dir)
+
+    # * feed into tsdf
+    print("trying to re-integrate TSDF...")
+    for i, idx in enumerate(range(IDXS[0], IDXS[1])):
+        #     color_img = cv.imread(str(intraop_img_paths[idx]))
+        #     color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
+
+        #     depth_img = warped_depth_maps[idx]
+        color_img = np.zeros((1080, 1920, 3))
+        # depth_img = np.ones((1080, 1920, 1))
+        depth_img = warped_depth_maps[idx]
+        # test_mask = np.ones_like(depth_img)
+        test_mask = cv.resize(
+            change_masks[i],
+            (1080, 1920),
+            interpolation=cv.INTER_AREA,
+        )
+        test_mask = np.expand_dims(test_mask, axis=-1)
+
+        tsdf_vol.integrate(
+            color_img,
+            depth_img,
+            intrinsics,
+            intraop_poses[idx],
+            min_depth=1.0e-3 * overall_mean_depth_value,
+            std_im=np.zeros_like(depth_img),
+            obs_weight=1.0,
+            mask=test_mask,
+        )
+    verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
+    tsdf.meshwrite(str(output_dir / "updated_mesh.ply"), verts, faces, -norms, colors)
+    print("done")
+
+    # ! quick render comparison
+    init_mesh = o3d.io.read_triangle_mesh(str(output_dir / "initial_fused_mesh.ply"))
+    init_renders = generate_renders(
+        seg=init_mesh,
+        intrinsics=intrinsics,
+        img_paths=preop_img_paths,
+        poses=intraop_poses,
+        mask=intraop_mask,
+    )
+    init_imgs = []
+    for i in range(len(init_renders)):
+        color_img, _, _ = init_renders[i]
+        color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
+        init_imgs.append(color_img)
+    del init_renders
+
+    updated_mesh = o3d.io.read_triangle_mesh(str(output_dir / "updated_mesh.ply"))
+    updated_renders = generate_renders(
+        seg=updated_mesh,
+        intrinsics=intrinsics,
+        img_paths=preop_img_paths,
+        poses=intraop_poses,
+        mask=intraop_mask,
+    )
+    updated_imgs = []
+    for i in range(len(updated_renders)):
+        color_img, _, _ = updated_renders[i]
+        color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
+        updated_imgs.append(color_img)
+    del updated_renders
+
+    disp_list = []
+    for idx, p in enumerate(intraop_img_paths):
+        img = cv.imread(str(p))
+
+        disp = cv.hconcat([init_imgs[idx], updated_imgs[idx], img])
+        disp_list.append(disp)
+    image_utils.save_video(disp_list, str(output_dir / "update_renders.mp4"))
 
 
 def extract_info(json_data, pose_in_m=False):
@@ -127,12 +206,7 @@ def extract_info(json_data, pose_in_m=False):
 
 
 def generate_renders(
-    seg,
-    intrinsics,
-    img_paths,
-    poses,
-    mask,
-    output_dir=None,
+    seg, intrinsics, img_paths, poses, mask, output_dir=None, desc=None
 ):
     render_list = render_utils.generate_renders(
         mesh=seg,
@@ -142,12 +216,13 @@ def generate_renders(
         img_height=mask.shape[0],
         mask=mask,
     )
+
     if output_dir is not None:
         render_utils.save_render_video(
             img_list=img_paths,
             mesh_render_list=render_list,
             output_dir=output_dir,
-            desc="intraop",
+            desc=desc,
         )
 
     return render_list
@@ -203,7 +278,7 @@ def build_tsdf(
     for i in range(len(render_list)):
         # Read RGB-D images
         color_img = cv.imread(str(img_path_list[i]))
-        color_img = cv.cvtColor(color_img, cv.color_BGR2RGB)
+        color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
 
         _, depth_img, _ = render_list[i]
         depth_img = np.expand_dims(depth_img, axis=-1)
@@ -225,7 +300,52 @@ def build_tsdf(
 
     tq.close()
 
-    return tsdf_vol
+    return tsdf_vol, overall_mean_depth_value
+
+
+def extract_change_mask(depth_diff_list, idxs=None, output_dir=None):
+    # ! this takes multiple intraop frames to isolate region of change
+    if idxs is not None:
+        depth_diff_list = depth_diff_list[idxs[0] : idxs[1]]
+
+    # accumulate differences across seq
+    err_vis = []
+    masks = []
+    count = 0 if idxs is None else idxs[0]
+    for err_map in depth_diff_list:
+        abs_err = np.abs(err_map)
+        threshold = 0.75 * np.max(abs_err)
+
+        err_mask = np.zeros_like(abs_err)
+        err_mask[abs_err > threshold] = 255
+        masks.append(err_mask)
+
+        # ! visualization
+        err_mask = np.uint8(np.repeat(err_mask[:, :, np.newaxis], 3, axis=2))
+
+        err_img = abs_err / np.max(abs_err) * 255
+        err_img = cv.applyColorMap(np.uint8(err_img), cv.COLORMAP_HOT)
+
+        row = cv.hconcat([err_img, err_mask])
+        head_w = row.shape[1]
+        header = np.zeros((50, head_w, 3), dtype=np.uint8)
+        header = cv.putText(
+            header,
+            f"Index:{count}",
+            (head_w // 3, 40),
+            cv.FONT_HERSHEY_PLAIN,
+            3,
+            (255, 255, 255),
+            2,
+            cv.LINE_AA,
+        )
+        count += 1
+        disp = cv.vconcat([header, row])
+        err_vis.append(disp)
+
+    image_utils.save_video(err_vis, save_path=str(output_dir / "depth_diff_mask.mp4"))
+
+    return masks
 
 
 def compare_intraop_renders(
@@ -320,11 +440,14 @@ def compare_warped_intraop(
     intraop_dir,
     intraop_img_paths,
     intraop_mask,
+    intraop_max_depth,
     output_dir,
 ):
     # * load estimated depth maps (dreco pipeline)
     depth_map_paths = sorted((intraop_dir / "estimated_depths").glob("*.npy"))
     depth_map_imgs = sorted((intraop_dir / "estimated_depths").glob("*.jpg"))
+
+    est_max_depth = get_max_depth_fr_maps(depth_map_paths)
 
     init_h, init_w, _ = cv.imread(str(depth_map_imgs[0])).shape
     (
@@ -343,13 +466,14 @@ def compare_warped_intraop(
 
     # * preop depth renders from CT
     preop_depth_maps, preop_depth_disp = compute_preop_depths(
-        preop_data, intrinsics, idxs=preop_key_idxs
+        preop_data, intrinsics, idxs=np.unique(preop_key_idxs)
     )
 
-    # TODO: put this in helper function this is so ugly
     assert len(preop_key_idxs) == len(flow_map_paths)
     errs = []
+    depth_diff_list = []
     warped_img_list = []  # visualization
+    warped_depths = []
     count = 0
     for idx, intraop_p, flow_p, depth_p, depth_img_p in zip(
         preop_key_idxs,
@@ -372,71 +496,119 @@ def compare_warped_intraop(
 
         # warping PREOP depth maps from CT
         warped_depth_map = image_utils.apply_flow(preop_depth, flow)
+        warped_depths.append(warped_depth_map)
         warped_depth_map = dreco_utils.downsample_image(
             warped_depth_map, start_h, end_h, start_w, end_w
         )
         warped_depth_map = image_utils.apply_mask(warped_depth_map, ds_intraop_mask)
 
         # compute error
-        err_tmp, _ = error_utils.scale_invariant_MSE(intraop_depth, warped_depth_map)
-        errs.append(err_tmp)
+        # err_tmp, _ = error_utils.scale_invariant_MSE(intraop_depth, warped_depth_map)
+        # errs.append(err_tmp)
 
-        # * VISUALIZATION
-        intraop_depth_img = cv.imread(str(depth_img_p))
-        intraop_depth_img = cv.applyColorMap(intraop_depth_img, cv.COLORMAP_JET)
-        intraop_depth_img = image_utils.apply_mask(intraop_depth_img, ds_intraop_mask)
+        tmp_mask_1 = np.zeros_like(warped_depth_map)
+        tmp_mask_1[warped_depth_map > 0.0] = 1
 
-        # warping images
-        pre_to_intra = image_utils.apply_flow(preop_img, flow)
-        pre_to_intra = dreco_utils.downsample_image(
-            pre_to_intra, start_h, end_h, start_w, end_w
+        tmp_mask_2 = np.zeros_like(intraop_depth)
+        tmp_mask_2[intraop_depth > 0.0] = 1
+
+        tmp_mask = np.logical_and(tmp_mask_1, tmp_mask_2)
+
+        depth_diff = warped_depth_map - (
+            intraop_depth * intraop_max_depth / est_max_depth
         )
-        pre_to_intra = image_utils.apply_mask(pre_to_intra, ds_intraop_mask)
+        depth_diff = image_utils.apply_mask(depth_diff, tmp_mask)
+        depth_diff_list.append(depth_diff)
+        # # ! for visualization
+        # depth_diff_img = render_utils.display_depth_map(
+        #     depth_diff, colormode=cv.COLORMAP_HOT
+        # )
+        # depth_diff_img = image_utils.apply_mask(depth_diff_img, tmp_mask).astype(
+        #     np.uint8
+        # )
 
-        # warping depth display image (normalized)
-        warped_depth_disp = image_utils.apply_flow(preop_disp, flow)
-        warped_depth_disp = dreco_utils.downsample_image(
-            warped_depth_disp, start_h, end_h, start_w, end_w
-        )
-        warped_depth_disp = image_utils.apply_mask(warped_depth_disp, ds_intraop_mask)
+        # # * VISUALIZATION
+        # intraop_depth_img = cv.imread(str(depth_img_p))
+        # intraop_depth_img = cv.applyColorMap(intraop_depth_img, cv.COLORMAP_JET)
+        # intraop_depth_img = image_utils.apply_mask(intraop_depth_img, ds_intraop_mask)
 
-        # downsampling original images (to match depth maps)
-        ds_preop_disp = dreco_utils.downsample_image(
-            preop_disp, start_h, end_h, start_w, end_w
-        )
-        ds_intraop_img = dreco_utils.downsample_image(
-            intraop_img, start_h, end_h, start_w, end_w
-        )
-        ds_preop_img = dreco_utils.downsample_image(
-            preop_img, start_h, end_h, start_w, end_w
-        )
+        # # warping input images
+        # # pre_to_intra = image_utils.apply_flow(preop_img, flow)
+        # # pre_to_intra = dreco_utils.downsample_image(
+        # #     pre_to_intra, start_h, end_h, start_w, end_w
+        # # )
+        # # pre_to_intra = image_utils.apply_mask(pre_to_intra, ds_intraop_mask)
 
-        # constructing frames for video
-        top = cv.hconcat([ds_intraop_img, pre_to_intra, ds_preop_img])
-        bottom = cv.hconcat([intraop_depth_img, warped_depth_disp, ds_preop_disp])
-        head_w = top.shape[1]
-        header = np.zeros((50, head_w, 3), dtype=np.uint8)
-        header = cv.putText(
-            header,
-            f"Index:{count}",
-            (head_w // 3, 40),
-            cv.FONT_HERSHEY_PLAIN,
-            3,
-            (255, 255, 255),
-            2,
-            cv.LINE_AA,
-        )
-        count += 1
+        # # warping depth display image (normalized)
+        # warped_depth_disp = image_utils.apply_flow(preop_disp, flow)
+        # warped_depth_disp = dreco_utils.downsample_image(
+        #     warped_depth_disp, start_h, end_h, start_w, end_w
+        # )
+        # warped_depth_disp = image_utils.apply_mask(warped_depth_disp, ds_intraop_mask)
 
-        img_tmp = cv.vconcat([header, top, bottom])
-        warped_img_list.append(img_tmp)
+        # # downsampling original images (to match depth maps)
+        # ds_preop_disp = dreco_utils.downsample_image(
+        #     preop_disp, start_h, end_h, start_w, end_w
+        # )
+        # # ds_intraop_img = dreco_utils.downsample_image(
+        # #     intraop_img, start_h, end_h, start_w, end_w
+        # # )
+        # # ds_preop_img = dreco_utils.downsample_image(
+        # #     preop_img, start_h, end_h, start_w, end_w
+        # # )
 
-    plt.plot(errs)
-    plt.savefig(str(output_dir / "raft_comparison.png"))
+        # # constructing frames for video
+        # # top = cv.hconcat([ds_intraop_img, pre_to_intra, ds_preop_img])
+        # # bottom = cv.hconcat([intraop_depth_img, warped_depth_disp, ds_preop_disp])
+        # # head_w = top.shape[1]
+        # row = cv.hconcat(
+        #     [ds_preop_disp, warped_depth_disp, intraop_depth_img, depth_diff_img]
+        # )
+        # head_w = row.shape[1]
+        # header = np.zeros((50, head_w, 3), dtype=np.uint8)
+        # header = cv.putText(
+        #     header,
+        #     f"Index:{count}",
+        #     (head_w // 3, 40),
+        #     cv.FONT_HERSHEY_PLAIN,
+        #     3,
+        #     (255, 255, 255),
+        #     2,
+        #     cv.LINE_AA,
+        # )
+        # count += 1
 
-    image_utils.save_video(
-        warped_img_list, save_path=str(output_dir / "raft_warped.mp4")
-    )
+        # # img_tmp = cv.vconcat([header, top, bottom])
+        # img_tmp = cv.vconcat([header, row])
+        # warped_img_list.append(img_tmp)
+
+    # plt.plot(errs)
+    # plt.savefig(str(output_dir / "raft_comparison.png"))
+
+    # image_utils.save_video(
+    #     warped_img_list, save_path=str(output_dir / "scaled_depth_diff.mp4")
+    # )
+
+    return np.asarray(depth_diff_list), np.asarray(warped_depths)
+
+
+def get_max_depth_fr_renders(render_list):
+    max_depth = 0.0
+    print("Computing max depth from renders...")
+    for i in tqdm(range(len(render_list))):
+        _, depth_img, _ = render_list[i]
+        max_depth = np.maximum(max_depth, np.amax(depth_img))
+
+    return max_depth
+
+
+def get_max_depth_fr_maps(map_path_list):
+    max_depth = 0.0
+    for p in map_path_list:
+        depth_map = np.load(p, allow_pickle=True)
+        max_depth = np.maximum(max_depth, np.amax(depth_map))
+
+    return max_depth
 
 
 def get_closest_preop(preop_poses, intraop_poses):

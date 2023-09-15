@@ -152,7 +152,7 @@ def display_depth_map(
     return depth_map_visualize
 
 
-def save_render_video(img_list, mesh_render_list, output_dir, desc):
+def save_render_video(img_list, mesh_render_list, output_dir, desc=None):
     assert len(img_list) == len(mesh_render_list)
 
     ## scale to visible max depth
@@ -161,8 +161,10 @@ def save_render_video(img_list, mesh_render_list, output_dir, desc):
 
     height, width, _ = mesh_render_list[0][0].shape
 
+    desc = desc + "_" if desc is not None else ""
+
     output_vid = cv.VideoWriter(
-        str(output_dir / f"{desc}_renders.mp4"),
+        str(output_dir / f"{desc}renders.mp4"),
         cv.VideoWriter_fourcc(*"mp4v"),
         15,
         (width * 3, height),
@@ -172,7 +174,10 @@ def save_render_video(img_list, mesh_render_list, output_dir, desc):
     print(f"Writing video...")
     for idx in tqdm(range(len(img_list))):
         img = cv.imread(str(img_list[idx]))
+
         render, _, depth = mesh_render_list[idx]
+        render = cv.cvtColor(render, cv.COLOR_BGR2RGB)
+
         frame = np.concatenate([img, render, depth], axis=1)
 
         output_vid.write(frame)
