@@ -85,31 +85,41 @@ def generate_renders(
     img_height,
     mask,
     save_dir=None,
+    save_option=[],
     idx_list=None,
 ):
+    """
+    save_option: list of "color_render", "depth_render", "depth_map"
+    """
     mesh_render_list = MeshRender(mesh, poses, intrinsics, img_height, img_width, mask)
 
     if save_dir is not None:
+        if "color_render" in save_option:
+            color_dir = save_dir / "color_renders"
+            color_dir.mkdir(parents=True, exist_ok=True)
+
+        if "depth_render" in save_option:
+            depth_dir = save_dir / "depth_renders"
+            depth_dir.mkdir(parents=True, exist_ok=True)
+
+        if "depth_map" in save_option:
+            depth_map_dir = save_dir / "depths"
+            depth_map_dir.mkdir(parents=True, exist_ok=True)
+
         # depth_maps = []
         for idx in tqdm(range(len(mesh_render_list))):
             color_img, depth_map, depth_disp = mesh_render_list[idx]
             # depth_maps.append(depth_map)
+            idx_name = f"{idx:06d}" if idx_list is None else f"{idx_list[idx]:06d}"
 
-            depth_dir = save_dir / "depth"
-            depth_dir.mkdir(parents=True, exist_ok=True)
+            if "color_render" in save_option:
+                plt.imsave(str(color_dir / f"color_{idx_name}.png"), color_img, mask)
 
-            color_dir = save_dir / "color"
-            color_dir.mkdir(parents=True, exist_ok=True)
+            if "depth_render" in save_option:
+                plt.imsave(str(depth_dir / f"depth_{idx_name}.png"), depth_disp, mask)
 
-            if idx_list is None:
-                depth_save = depth_dir / f"depth_{idx:06d}.png"
-                color_save = color_dir / f"color_{idx:06d}.png"
-            else:
-                depth_save = depth_dir / f"depth_{idx_list[idx]:06d}.png"
-                color_save = color_dir / f"color_{idx_list[idx]:06d}.png"
-
-            plt.imsave(str(depth_save), depth_disp, mask)
-            plt.imsave(str(color_save), color_img, mask)
+            if "depth_map" in save_option:
+                np.save(str(depth_map_dir / f"depth_{idx_name}.npy"), depth_map, allow_pickle=True)
 
     return mesh_render_list
 
