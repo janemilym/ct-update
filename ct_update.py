@@ -36,7 +36,7 @@ def ct_update(input):
         preop_poses,
         preop_idxs,
         preop_seg,
-    ) = extract_info(preop_data)
+    ) = data_utils.extract_json(preop_data)
     (
         intraop_dir,
         intraop_img_paths,
@@ -44,7 +44,7 @@ def ct_update(input):
         intraop_poses,
         intraop_idxs,
         _,
-    ) = extract_info(intraop_data)
+    ) = data_utils.extract_json(intraop_data)
 
     # * build preop TSDF volume
     preop_renders = generate_renders(
@@ -101,36 +101,38 @@ def ct_update(input):
 
     # # ! MANUALLY SELECTED - STABLE WARPING
     IDXS = (28, 66)
+    I = 0
+    IDX = 28
     change_masks = extract_change_mask(depth_errs, idxs=IDXS, output_dir=output_dir)
 
     # * feed into tsdf
     print("trying to re-integrate TSDF...")
-    for i, idx in enumerate(range(IDXS[0], IDXS[1])):
-        #     color_img = cv.imread(str(intraop_img_paths[idx]))
-        #     color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
+    # for i, idx in enumerate(range(IDXS[0], IDXS[1])):
+    #     color_img = cv.imread(str(intraop_img_paths[idx]))
+    #     color_img = cv.cvtColor(color_img, cv.COLOR_BGR2RGB)
 
-        #     depth_img = warped_depth_maps[idx]
-        color_img = np.zeros((1080, 1920, 3))
-        # depth_img = np.ones((1080, 1920, 1))
-        depth_img = warped_depth_maps[idx]
-        # test_mask = np.ones_like(depth_img)
-        test_mask = cv.resize(
-            change_masks[i],
-            (1080, 1920),
-            interpolation=cv.INTER_AREA,
-        )
-        test_mask = np.expand_dims(test_mask, axis=-1)
+    #     depth_img = warped_depth_maps[idx]
+    color_img = np.zeros((1080, 1920, 3))
+    # depth_img = np.ones((1080, 1920, 1))
+    depth_img = warped_depth_maps[IDX]
+    # test_mask = np.ones_like(depth_img)
+    test_mask = cv.resize(
+        change_masks[I],
+        (1080, 1920),
+        interpolation=cv.INTER_AREA,
+    )
+    test_mask = np.expand_dims(test_mask, axis=-1)
 
-        tsdf_vol.integrate(
-            color_img,
-            depth_img,
-            intrinsics,
-            intraop_poses[idx],
-            min_depth=1.0e-3 * overall_mean_depth_value,
-            std_im=np.zeros_like(depth_img),
-            obs_weight=1.0,
-            mask=test_mask,
-        )
+    tsdf_vol.integrate(
+        color_img,
+        depth_img,
+        intrinsics,
+        intraop_poses[IDX],
+        min_depth=1.0e-3 * overall_mean_depth_value,
+        std_im=np.zeros_like(depth_img),
+        obs_weight=1.0,
+        mask=test_mask,
+    )
     verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
     tsdf.meshwrite(str(output_dir / "updated_mesh.ply"), verts, faces, -norms, colors)
     print("done")
@@ -173,36 +175,6 @@ def ct_update(input):
         disp = cv.hconcat([init_imgs[idx], updated_imgs[idx], img])
         disp_list.append(disp)
     image_utils.save_video(disp_list, str(output_dir / "update_renders.mp4"))
-
-
-def extract_info(json_data, pose_in_m=False):
-    base_dir = Path(json_data["base_dir"]).expanduser()
-
-    img_dir = json_data["img_dir"] if "img_dir" in json_data else "images"
-    img_list = sorted(Path(str(base_dir / img_dir)).glob("*.jpg"))
-
-    seg = (
-        o3d.io.read_triangle_mesh(str(base_dir / json_data["seg"]))
-        if "seg" in json_data
-        else None
-    )
-
-    pose_file = json_data["poses"] if "poses" in json_data else "trajectories.csv"
-    poses = pose_utils.load_trajectories(str(base_dir / pose_file))
-    poses, idxs = pose_utils.subsample_poses(
-        poses=poses,
-        indexes=(json_data["start_idx"], json_data["end_idx"]),
-        interval=json_data["interval"],
-    )
-    if pose_in_m:
-        poses = pose_utils.scale_poses(poses, 1000)
-
-    mask = cv.imread(str(base_dir / "undistorted_mask.bmp"), cv.IMREAD_GRAYSCALE)
-
-    ## check that poses were subsampled correctly
-    assert len(img_list) == len(poses)
-
-    return base_dir, img_list, mask, poses, idxs, seg
 
 
 def generate_renders(
@@ -646,7 +618,7 @@ def compute_preop_depths(preop_json, intrinsics, idxs, output_dir=None):
         preop_poses,
         preop_idxs,
         preop_seg,
-    ) = extract_info(preop_json)
+    ) = data_utils.extract_json(preop_json)
     preop_renders = render_utils.generate_renders(
         mesh=preop_seg,
         poses=preop_poses,
