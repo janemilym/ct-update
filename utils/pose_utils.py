@@ -5,7 +5,7 @@ from pathlib import Path
 import pytransform3d.transformations as pt
 import open3d as o3d
 
-from . import error_utils
+from . import register_utils
 
 
 def plot_and_save_trajectory(
@@ -132,6 +132,14 @@ def invert_poses(poses):
     return copy_poses
 
 
+def invert_pose(pose):
+    inverted = copy.deepcopy(pose)
+    inverted[:3, :3] = np.transpose(pose[:3, :3])
+    inverted[:3, 3] = np.matmul(-np.transpose(pose[:3, :3]), pose[:3, 3])
+
+    return inverted
+
+
 def scale_poses(poses, scale):
     scaled_poses_list = []
     poses_copy = copy.deepcopy(poses)
@@ -191,3 +199,35 @@ def find_nearest_pose(query, poses):
     # breakpoint()
 
     return np.argmin(dist)
+
+
+def register_poses(source, target):
+    ## extract correspondences (camera centers)
+    source_pts = np.array([pose[:3, 3] for pose in source])
+    target_pts = np.array([pose[:3, 3] for pose in target])
+
+    transform = register_utils.register_rigid(source=source_pts, target=target_pts)
+
+    transformed_pts = np.array([transform @ np.hstack([pt, 1]) for pt in source_pts])
+    transformed_pts = transformed_pts[:, :3]
+
+    res_err = np.linalg.norm(transformed_pts - target_pts, axis=1)
+
+    return transform, np.mean(res_err)
+
+
+def calculate_pose_error(poses_1, poses_2):
+    assert poses_1.shape == poses_2.shape
+
+    rot_err_list = []
+    tr_err_list = []
+
+    for idx, p in enumerate(poses_1):
+        rot = p[:3, :3] @ poses_2[idx, :3, :3]
+        rot_err = np.arccos((np.trace(rot) - 1) / 2)
+        rot_err_list.append(rot_err)
+
+        tr_err = np.linalg.norm(p[:3, 3] - poses_2[idx, :3, 3])
+        tr_err_list.append(tr_err)
+
+    return np.array(rot_err_list), np.array(tr_err_list)

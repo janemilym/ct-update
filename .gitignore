@@ -1,6 +1,18 @@
 # Directories
 data
 debug
+figures
+meshrender
+
+# other files
+figures.py
+build_figures.sh
+sandbox.ipynb
+
+# experiments and eval
+ct_update_depth.py
+ct_update_reg.py
+evaluation.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

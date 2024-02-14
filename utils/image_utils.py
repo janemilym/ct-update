@@ -1,6 +1,10 @@
 import numpy as np
 import cv2 as cv
 from tqdm import tqdm
+import open3d as o3d
+
+from . import pose_utils
+from . import register_utils
 
 
 def apply_mask(img, mask):
@@ -24,17 +28,130 @@ def apply_mask(img, mask):
     return masked_img
 
 
-def apply_flow(prev_frame, flow):
-    height, width, _ = flow.shape
-    R2 = np.dstack(np.meshgrid(np.arange(width), np.arange(height)))
+def canny_edge_detection(img):
+    # Convert the frame to grayscale for edge detection
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
-    pixel_map = R2 - flow
-    pixel_map = pixel_map.astype("float32")
-    new_frame = cv.remap(
-        prev_frame, pixel_map[:, :, 0:1], pixel_map[:, :, 1:], cv.INTER_LINEAR
-    )
+    # Apply Gaussian blur to reduce noise and smoothen edges
+    blurred = cv.GaussianBlur(src=gray, ksize=(5, 5), sigmaX=0)
 
-    return new_frame
+    # Perform Canny edge detection
+    edges = cv.Canny(blurred, 50, 125)
+
+    return edges
+
+
+def sobel_edge_detection(img):
+    grad_x = cv.Sobel(img, cv.CV_64F, 1, 0)
+    grad_y = cv.Sobel(img, cv.CV_64F, 0, 1)
+    grad = np.sqrt(grad_x**2 + grad_y**2)
+    grad_norm = (grad * 255 / grad.max()).astype(np.uint8)
+
+    return grad_norm
+
+
+# def apply_optical_flow(prev_frame, flow):
+#     height, width, _ = flow.shape
+#     R2 = np.dstack(np.meshgrid(np.arange(width), np.arange(height)))
+
+#     pixel_map = R2 - flow
+#     pixel_map = pixel_map.astype("float32")
+#     new_frame = cv.remap(
+#         prev_frame, pixel_map[:, :, 0:1], pixel_map[:, :, 1:], cv.INTER_LINEAR
+#     )
+
+#     return new_frame
+
+
+def apply_scene_flow(depth_map, orig_pose, new_pose, intrinsics, flow):
+    height, width = depth_map.shape
+
+    warped_depth = np.zeros_like(depth_map)
+    pts = []
+    pre_flow = []
+    post_flow = []
+    colors = []
+    for u in range(height):
+        for v in range(width):
+            # extract 3d points in world frame
+            z = depth_map[u, v]
+            if z == 0:
+                # skipping zero depths
+                continue
+            x = (v - intrinsics[0, 2]) * z / intrinsics[0, 0]
+            y = (u - intrinsics[1, 2]) * z / intrinsics[1, 1]
+
+            orig_pt_3d = orig_pose @ np.array([x, y, z, 1])
+            new_pt_3d = orig_pose @ (flow[u, v] @ np.array([x, y, z, 1]))
+
+            pre_flow.append(orig_pt_3d[:3])
+            post_flow.append(new_pt_3d[:3])
+
+            # project back to new camera
+            new_pt = pose_utils.invert_pose(new_pose) @ new_pt_3d
+            new_pt = new_pt[:2] / new_pt[2]
+
+            new_v = new_pt[0] * intrinsics[0, 0] + intrinsics[0, 2]  # x -> v
+            new_u = new_pt[1] * intrinsics[1, 1] + intrinsics[1, 2]  # y -> u
+
+            new_v = np.round(new_v).astype(int)
+            new_u = np.round(new_u).astype(int)
+
+            if (new_v < 0) or (new_u < 0) or (new_u >= height) or (new_v >= width):
+                continue
+            else:
+                warped_depth[new_u, new_v] = z
+                pts.append((np.array([new_u, new_v]), new_pt_3d[:3]))
+
+    # err_norm = np.linalg.norm(np.asarray(pre_flow) - np.asarray(post_flow), axis=1)
+    # colors_pre = np.zeros((len(err_norm), 3))
+    # colors_pre[err_norm > 15] = [0, 255, 0]
+    # colors_post = np.ones((len(err_norm), 3)) * 128
+    # colors_post[err_norm > 15] = [255, 0, 0]
+    # save_3d_points(np.asarray(pre_flow), "test_3d_projected.ply", colors=colors)
+    # save_3d_points(np.asarray(post_flow), "test_3d_flow.ply", colors=colors)
+
+    # adjust_T = register_utils.register_3d(
+    #     source_pts=np.asarray(post_flow), target_pts=np.asarray(pre_flow)
+    # )
+    # adjusted_pose = adjust_T @ new_pose
+    # new_pts = np.array([adjust_T @ np.hstack([pt, 1]) for pt in post_flow])
+    # new_pts = new_pts[:, :3]
+    # save_3d_points(new_pts, "test_flow_transform.ply")
+
+    return warped_depth
+
+
+def project_2d_to_3d(u, v, depth_map, pose, intrinsics):
+    z = depth_map[u, v]
+    x = (v - intrinsics[0, 2]) * z / intrinsics[0, 0]
+    y = (u - intrinsics[1, 2]) * z / intrinsics[1, 1]
+
+    pt_3d = pose @ np.array([x, y, z, 1])
+    return pt_3d[:3]
+
+
+def project_3d_to_2d(pt, pose, intrinsics):
+    new_pt = pose_utils.invert_pose(pose) @ np.hstack([pt, 1])
+    depth = new_pt[2]
+    new_pt = new_pt[:2] / depth
+
+    new_v = new_pt[0] * intrinsics[0, 0] + intrinsics[0, 2]  # x -> v
+    new_u = new_pt[1] * intrinsics[1, 1] + intrinsics[1, 2]  # y -> u
+
+    new_v = np.round(new_v).astype(int)
+    new_u = np.round(new_u).astype(int)
+
+    return [new_u, new_v], depth
+
+
+def save_3d_points(point_array, save_path, colors=None):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(point_array)
+    if colors is not None:
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    o3d.io.write_point_cloud(str(save_path), pcd)
 
 
 def save_keypoint_video(kp_imgs, output_dir, desc=None):
@@ -74,6 +191,28 @@ def save_video(img_list, save_path="video.mp4"):
     output_vid.release()
 
     print(f"Saved video to: {save_path}")
+
+
+def interpolate(img):
+    h, w = img.shape
+    imgResult = np.zeros((h, w), np.uint8)
+    h_mask, w_mask = (1, 1)
+    threshold = 0.0
+    for j in range(h):
+        for i in range(w):
+            if img[j, i] == threshold:
+                ymin = (j - h_mask) if (j - h_mask) >= 0 else 0
+                ymax = (j + h_mask) if (j + h_mask) < h else (h - 1)
+                xmin = (i - w_mask) if (j - w_mask) >= 0 else 0
+                xmax = (i + w_mask) if (j + w_mask) < w else (w - 1)
+
+                vals = img[ymin:ymax, xmin:xmax].flatten()
+                imgResult[j, i] = np.mean(vals[vals != 0])
+                # imgResult[j, i] = cv.mean(img[ymin:ymax, xmin:xmax])[0]
+            else:
+                imgResult[j, i] = img[j, i]
+
+    return imgResult
 
 
 # * unused functions

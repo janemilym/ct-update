@@ -69,3 +69,18 @@ def downsample_image(img, start_h, end_h, start_w, end_w, downsampling_factor=4.
         # downsampled_img = cv.cvtColor(downsampled_img, cv.COLOR_BGR2RGB)
 
     return downsampled_img
+
+
+def modify_camera_intrinsic_matrix(
+    intrinsic_matrix, start_h, start_w, downsampling_factor=4.0
+):
+    intrinsic_matrix_modified = np.copy(intrinsic_matrix)
+    intrinsic_matrix_modified[0][0] = intrinsic_matrix[0][0] / downsampling_factor
+    intrinsic_matrix_modified[1][1] = intrinsic_matrix[1][1] / downsampling_factor
+    intrinsic_matrix_modified[0][2] = (
+        intrinsic_matrix[0][2] / downsampling_factor - start_w
+    )
+    intrinsic_matrix_modified[1][2] = (
+        intrinsic_matrix[1][2] / downsampling_factor - start_h
+    )
+    return intrinsic_matrix_modified

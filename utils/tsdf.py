@@ -204,18 +204,19 @@ class TSDFVolume(object):
             if (invalid > 0) {
                 //tsdf_vol[voxel_idx] = 0;
                 //weight_vol[voxel_idx] = 0;
-                w_old = 0;
-                dist = 0;
+                w_old = 0.0;
+                //dist = 0;
                 //obs_weight = 0.000001;
             }
             float w_new = w_old + obs_weight;
             tsdf_vol[voxel_idx] = (tsdf_vol[voxel_idx] * w_old + dist * obs_weight) / w_new;
             weight_vol[voxel_idx] = w_new;
             // Integrate color
-            if (invalid > 0) {
-                color_vol[voxel_idx] = 0;
-                return;
-            }
+            // paint changed voxels black
+            //if (invalid > 0) {
+            //    color_vol[voxel_idx] = 0;
+            //    return;
+            //}
             float new_color = color_im[pixel_y * im_w + pixel_x];
             float new_b = floorf(new_color / (256 * 256));
             float new_g = floorf((new_color - new_b * 256 * 256) / 256);

@@ -62,6 +62,7 @@ class MeshRender(Dataset):
         normalized_image = display_depth_map(depth_image, scale=self.scale)
 
         color_image = np.asarray(self.scene.render_to_image())
+        color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
 
         # remove light from scene to update in next render
         # renderer_o3d.scene.scene.remove_light("light")
@@ -113,13 +114,19 @@ def generate_renders(
             idx_name = f"{idx:06d}" if idx_list is None else f"{idx_list[idx]:06d}"
 
             if "color_render" in save_option:
-                plt.imsave(str(color_dir / f"color_{idx_name}.png"), color_img, mask)
+                color_img = image_utils.apply_mask(color_img, mask)
+                cv.imwrite(str(color_dir / f"color_{idx_name}.png"), color_img)
 
             if "depth_render" in save_option:
-                plt.imsave(str(depth_dir / f"depth_{idx_name}.png"), depth_disp, mask)
+                depth_disp = image_utils.apply_mask(depth_disp, mask)
+                cv.imwrite(str(depth_dir / f"depth_{idx_name}.png"), depth_disp)
 
             if "depth_map" in save_option:
-                np.save(str(depth_map_dir / f"depth_{idx_name}.npy"), depth_map, allow_pickle=True)
+                np.save(
+                    str(depth_map_dir / f"depth_{idx_name}.npy"),
+                    depth_map,
+                    allow_pickle=True,
+                )
 
     return mesh_render_list
 
@@ -136,7 +143,7 @@ def get_max_depth(mesh_render_list):
 
 
 def display_depth_map(
-    depth_map, min_value=None, max_value=None, colormode=cv.COLORMAP_JET, scale=None
+    depth_map, min_value=None, max_value=None, colormode=cv.COLORMAP_PINK, scale=None
 ):
     if (min_value is None or max_value is None) and scale is None:
         if len(depth_map[depth_map > 0]) > 0:
@@ -183,10 +190,11 @@ def save_render_video(img_list, mesh_render_list, output_dir, desc=None):
 
     print(f"Writing video...")
     for idx in tqdm(range(len(img_list))):
-        img = cv.imread(str(img_list[idx]))
+        # img = cv.imread(str(img_list[idx]))
+        img = img_list[idx]
 
         render, _, depth = mesh_render_list[idx]
-        render = cv.cvtColor(render, cv.COLOR_BGR2RGB)
+        # render = cv.cvtColor(render, cv.COLOR_BGR2RGB)
 
         frame = np.concatenate([img, render, depth], axis=1)
 
