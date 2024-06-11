@@ -11,8 +11,7 @@ sandbox.ipynb
 
 # experiments and eval
 run_ct_update.sh
-ct_update_depth.py
-ct_update_reg.py
+exp_*.py
 evaluation.py
 
 # Byte-compiled / optimized / DLL files
