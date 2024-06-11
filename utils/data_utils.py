@@ -5,7 +5,7 @@ import open3d as o3d
 import cv2 as cv
 
 from . import pose_utils
-from . import dreco_utils as dreco
+from . import downsample_utils as dreco
 from . import render_utils
 
 
@@ -17,11 +17,6 @@ def extract_json(json_file):
     data_dir = Path(args["data_dir"]).expanduser()
 
     preop_data = args["preop_data"]
-    # intraop_data = args["intraop_data"]
-
-    # intraop_data = []
-    # for i in range(1, args["steps"] + 1):
-    #     intraop_data.append(args[f"{i}"])
 
     preop = PatientData(preop_data, intrinsics)
     intraop = []
@@ -56,39 +51,6 @@ class PatientData:
             indexes=(json_data["start_idx"], json_data["end_idx"]),
             interval=json_data["interval"],
         )
-        # if pose_in_m:
-        #     poses = pose_utils.scale_poses(poses, 1000)
-
-        # ! PROBLEM WITH ALIGNED POSES
-        # if "gt_poses" in json_data:
-        #     gt_poses = pose_utils.load_trajectories(
-        #         str(self.base_dir / json_data["gt_poses"])
-        #     )
-
-        #     self.gt_poses, _ = pose_utils.subsample_poses(
-        #         poses=gt_poses,
-        #         indexes=(json_data["start_idx"], json_data["end_idx"]),
-        #         interval=json_data["interval"],
-        #     )
-        #     breakpoint()
-
-        #     # NOTE: registering here to use all poses
-        #     self.T, _ = pose_utils.register_poses(
-        #         source=gt_poses[: json_data["end_idx"]],
-        #         target=poses[: json_data["end_idx"]],
-        #     )
-
-        # ! debug vis
-        # transformed_poses = pose_utils.transform_poses(gt_poses, self.T)
-        # pose_utils.plot_and_save_trajectory(
-        #     transformed_poses, save_name="test_transformed_poses.ply"
-        # )
-        # pose_utils.plot_and_save_trajectory(
-        #     poses, save_name="test_poses_in_preop.ply"
-        # )
-        # pose_utils.plot_and_save_trajectory(
-        #     gt_poses, save_name="test_orig_intraop.ply"
-        # )
 
         self.mask = cv.imread(
             str(self.base_dir / "undistorted_mask.bmp"), cv.IMREAD_GRAYSCALE

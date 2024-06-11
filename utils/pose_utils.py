@@ -23,10 +23,8 @@ def plot_and_save_trajectory(
     for j, cam_pose in enumerate(poses):
         if j % subsampling_factor != 0:
             continue
-        # rot = np.transpose(cam_pose[0:3, 0:3])
         rot = cam_pose[0:3, 0:3]
         transl = cam_pose[:3, 3]
-        # transl = np.matmul(-np.transpose(rot), cam_pose[:3, 3])
         points.append(transl)
         tm.append(pt.transform_from(R=rot, p=transl))
     transformation_matrices = np.asarray(tm)
@@ -113,16 +111,6 @@ def get_extrinsic_matrix(poses):
     return np.asarray(extrinsic_matrices)
 
 
-def read_colmap_trajectory(trajectory_path):
-    stream = open(trajectory_path, "r")
-    doc = yaml.safe_load(stream)
-    _, values = doc.items()
-    poses = values[1]
-    mat_poses = get_extrinsic_matrix(poses)
-
-    return mat_poses
-
-
 def invert_poses(poses):
     copy_poses = copy.deepcopy(poses)
     for i, pose in enumerate(copy_poses):
@@ -159,13 +147,6 @@ def transform_poses(poses, transformation):
     return transformed_pose
 
 
-def load_colmap_yaml(poses_path, invert=True):
-    colmap_poses = read_colmap_trajectory(poses_path)
-    if invert:
-        colmap_poses = invert_poses(colmap_poses)
-    return colmap_poses
-
-
 def save_poses(poses, save_path):
     """
     Args:
@@ -188,32 +169,8 @@ def find_nearest_pose(query, poses):
     q_pos = query[:3, 3]
 
     dist = np.linalg.norm(seq_pos - q_pos, axis=1)
-    # sorted_idxs = np.argsort(dist)
-
-    # ## check view
-    # axis_errs = []
-    # for i in sorted_idxs:
-    #     check = error_utils.axis_angle_err(poses[i, :3, :3], query[:3, :3])
-    #     axis_errs.append(np.rad2deg(check))
-
-    # breakpoint()
 
     return np.argmin(dist)
-
-
-def register_poses(source, target):
-    ## extract correspondences (camera centers)
-    source_pts = np.array([pose[:3, 3] for pose in source])
-    target_pts = np.array([pose[:3, 3] for pose in target])
-
-    transform = register_utils.register_rigid(source=source_pts, target=target_pts)
-
-    transformed_pts = np.array([transform @ np.hstack([pt, 1]) for pt in source_pts])
-    transformed_pts = transformed_pts[:, :3]
-
-    res_err = np.linalg.norm(transformed_pts - target_pts, axis=1)
-
-    return transform, np.mean(res_err)
 
 
 def calculate_pose_error(poses_1, poses_2):

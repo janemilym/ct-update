@@ -171,7 +171,7 @@ def register_rigid(source, target):
     H = np.dot(AA.T, BB)
     U, S, Vt = np.linalg.svd(H)
     R = np.dot(Vt.T, U.T)
-    # breakpoint()
+
     # special reflection case
     if np.linalg.det(R) < 0:
         Vt[m - 1, :] *= -1
@@ -184,5 +184,4 @@ def register_rigid(source, target):
     T = np.identity(m + 1)
     T[:m, :m] = R
     T[:m, m] = t
-    # Retunrs Homogeneos and decomposition.
     return T

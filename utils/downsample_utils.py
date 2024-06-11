@@ -1,6 +1,7 @@
 import numpy as np
 import cv2 as cv
 
+# * downsampling based on Dense Depth Estimation (https://github.com/lppllppl920/EndoscopyDepthEstimation-Pytorch)
 
 def downsample_and_crop_mask(
     mask, downsampling_factor=4.0, divide=64, suggested_h=None, suggested_w=None
