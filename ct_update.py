@@ -21,16 +21,6 @@ def ct_update(input, desc):
     output_dir = data_dir / desc
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # * create directories for outputs
-    mesh_dir = output_dir / "meshes"
-    mesh_dir.mkdir(parents=True, exist_ok=True)
-
-    change_dir = output_dir / "changes"
-    change_dir.mkdir(parents=True, exist_ok=True)
-
-    mask_dir = output_dir / "masks"
-    mask_dir.mkdir(parents=True, exist_ok=True)
-
     preop_start = time.time()
     # * build preop TSDF volume
     preop_renders = preop.generate_renders()
@@ -43,7 +33,7 @@ def ct_update(input, desc):
     )
     del preop_renders
     verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
-    tsdf.meshwrite(str(mesh_dir / "initial_mesh.ply"), verts, faces, -norms, colors)
+    tsdf.meshwrite(str(output_dir / "initial_mesh.ply"), verts, faces, -norms, colors)
     runtime.append(time.time() - preop_start)
 
     for bite, intra in enumerate(intraop):
@@ -55,7 +45,6 @@ def ct_update(input, desc):
             (scaled_intraop_depths, change_masks) = compare_warped_intraop(
                 preop,
                 intra,
-                output_dir=change_dir,
                 desc=f"bite{bite + 1}",
             )
         else:
@@ -64,14 +53,10 @@ def ct_update(input, desc):
                 intraop[bite - 1],
                 intra,
                 last_seg=prev_update,
-                output_dir=change_dir,
                 desc=f"bite{bite + 1}",
             )
 
         # * feed into tsdf
-        bite_mask_dir = mask_dir / f"bite_{bite + 1:02d}"
-        bite_mask_dir.mkdir(parents=True, exist_ok=True)
-
         print("Re-integrating TSDF...")
         for idx, (new_depth, new_mask) in tqdm(
             enumerate(zip(scaled_intraop_depths, change_masks)),
@@ -97,9 +82,8 @@ def ct_update(input, desc):
                 obs_weight=1.0,
                 mask=new_mask,
             )
-            cv.imwrite(str(bite_mask_dir / f"mask_{idx}.png"), new_mask)
         verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
-        new_mesh_path = mesh_dir / f"updated_mesh_bite{bite + 1:02d}.ply"
+        new_mesh_path = output_dir / f"updated_mesh_bite{bite + 1:02d}.ply"
         tsdf.meshwrite(
             str(new_mesh_path),
             verts,
@@ -186,7 +170,7 @@ def build_tsdf(
     return tsdf_vol, overall_mean_depth_value
 
 
-def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
+def compare_warped_intraop(preop, intraop, output_dir=None, last_seg=None, desc=""):
     # * load estimated depth maps
     depth_map_paths = sorted((intraop.base_dir / "depths").glob("*.npy"))
     if last_seg:
@@ -291,7 +275,8 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
         frame = cv.vconcat([header, imgs])
         vid_frames.append(frame)
 
-    image_utils.save_video(vid_frames, str(output_dir / f"detected_changes_{desc}.mp4"))
+    if output_dir is not None:
+        image_utils.save_video(vid_frames, str(output_dir / f"detected_changes_{desc}.mp4"))
 
     return (np.asarray(new_depths), np.asarray(change_masks))
 
