@@ -4,7 +4,6 @@ from pathlib import Path
 import open3d as o3d
 import cv2 as cv
 
-from . import pose_utils
 from . import downsample_utils as dreco
 from . import render_utils
 
@@ -35,22 +34,14 @@ class PatientData:
         self.img_paths = sorted(Path(str(self.base_dir / img_dir)).glob("*.jpg"))
         self.images = [cv.imread(str(img_path)) for img_path in self.img_paths]
 
-        self.seg_path = self.base_dir / json_data["seg"]
+        if "seg" in json_data:
+            self.seg_path = self.base_dir / json_data["seg"]
+            self.seg = o3d.io.read_triangle_mesh(str(self.seg_path))
+        else:
+            self.seg = None
 
-        self.seg = (
-            o3d.io.read_triangle_mesh(str(self.seg_path))
-            if "seg" in json_data
-            else None
-        )
-
-        pose_file = json_data["poses"] if "poses" in json_data else "trajectories.csv"
-        poses = pose_utils.load_trajectories(str(self.base_dir / pose_file))
-
-        self.poses, self.idxs = pose_utils.subsample_poses(
-            poses=poses,
-            indexes=(json_data["start_idx"], json_data["end_idx"]),
-            interval=json_data["interval"],
-        )
+        pose_file = json_data["poses"] if "poses" in json_data else "trajectories.npy"
+        self.poses = np.load(str(self.base_dir / pose_file), allow_pickle=True)
 
         self.mask = cv.imread(
             str(self.base_dir / "undistorted_mask.bmp"), cv.IMREAD_GRAYSCALE

@@ -51,6 +51,7 @@ def ct_update(input, desc):
 
         # * compare warped preop CT to intraop poses with est depth
         if bite == 0:
+            preop.downsample()
             (scaled_intraop_depths, change_masks) = compare_warped_intraop(
                 preop,
                 intra,
@@ -68,7 +69,7 @@ def ct_update(input, desc):
             )
 
         # * feed into tsdf
-        bite_mask_dir = mask_dir / f"bite_{bite + 1}"
+        bite_mask_dir = mask_dir / f"bite_{bite + 1:02d}"
         bite_mask_dir.mkdir(parents=True, exist_ok=True)
 
         print("Re-integrating TSDF...")
@@ -98,7 +99,7 @@ def ct_update(input, desc):
             )
             cv.imwrite(str(bite_mask_dir / f"mask_{idx}.png"), new_mask)
         verts, faces, norms, colors, _ = tsdf_vol.get_mesh(only_visited=True)
-        new_mesh_path = mesh_dir / f"updated_mesh_bite{bite + 1}.ply"
+        new_mesh_path = mesh_dir / f"updated_mesh_bite{bite + 1:02d}.ply"
         tsdf.meshwrite(
             str(new_mesh_path),
             verts,
@@ -197,9 +198,6 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
     change_masks = []
     preop_depths = []
     vid_frames = []
-    # for visualization
-    all_render_pts = []
-    all_est_pts_reg = []
     for i, (intraop_pose, depth_p) in tqdm(
         enumerate(
             zip(
@@ -212,13 +210,6 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
         # * intraop info
         # estimated INTRAOP depth
         intraop_depth = np.load(depth_p, allow_pickle=True)
-        intraop_depth = downsample_utils.downsample_image(
-            intraop_depth,
-            intraop.start_h,
-            intraop.end_h,
-            intraop.start_w,
-            intraop.end_w,
-        )
 
         mask = np.zeros_like(intraop_depth)
         mask[intraop_depth != 0] = 255
@@ -244,8 +235,6 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
                     )
                     render_3d.append(render_pt)
 
-                    all_render_pts.append(render_pt)
-
         _, _, new_scale = register_utils.find_scale(
             source_pts=np.asarray(est_3d), target_pts=np.asarray(render_3d)
         )
@@ -266,8 +255,6 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
         scaled_intraop_depth = copy.deepcopy(preop_depth)
         count = 0
         for pt_3d in est_reg:
-            all_est_pts_reg.append(pt_3d)
-
             pt_2d, depth = image_utils.project_3d_to_2d(
                 pt_3d, intraop_pose, intraop.intrinsics
             )
@@ -292,7 +279,7 @@ def compare_warped_intraop(preop, intraop, output_dir, last_seg=None, desc=""):
         depth_diff[preop_depth == 0] = 0
 
         change_mask = np.zeros_like(depth_diff)
-        threshold = 1.0  # ! here
+        threshold = 1.0  # mm
         change_mask[depth_diff > threshold] = 255
         change_masks.append(change_mask)
 
