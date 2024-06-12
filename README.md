@@ -1,6 +1,6 @@
 # An Endoscopic Chisel: Intraoperative Imaging Carves 3D Anatomical Models
 
-![Algorithm Overivew] (./images/algorithm.png)
+![Algorithm Overview](./images/algorithm.png)
 ## Summary
 This repository contains the source code for the method described in the paper, [An Endoscopic Chisel: Intraoperative Imaging Carves 3D Anatomical Models](https://link.springer.com/article/10.1007/s11548-024-03151-w), which was presented at IPCAI 2024 in Barcelona, Spain.
 
