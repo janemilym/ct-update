@@ -23,11 +23,6 @@ wget "https://livejohnshopkins-my.sharepoint.com/:u:/g/personal/jmangul1_jh_edu/
 unzip sample_sinus_p04.zip
 ```
 
-Activate the environment
-```
-conda activate ct_update
-```
-
 Run the following python script
 ```
 python ct_update.py --input ./p04_left/input.json
