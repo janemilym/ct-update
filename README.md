@@ -1,6 +1,6 @@
 # An Endoscopic Chisel: Intraoperative Imaging Carves 3D Anatomical Models
 
-
+![Algorithm Overivew] (./images/algorithm.png)
 ## Summary
 This repository contains the source code for the method described in the paper, [An Endoscopic Chisel: Intraoperative Imaging Carves 3D Anatomical Models](https://link.springer.com/article/10.1007/s11548-024-03151-w), which was presented at IPCAI 2024 in Barcelona, Spain.
 
@@ -19,7 +19,7 @@ conda activate ct_update
 ## Sample Usage
 Download our sample data using
 ```
-wget "" -O sample_sinus_p04.zip
+wget "https://livejohnshopkins-my.sharepoint.com/:u:/g/personal/jmangul1_jh_edu/EfIk4Dje4CBFlhHmpwEwQVQBTdKwTGz0Wpb8j5iIUdg-QQ?e=n8XJT4" -O sample_sinus_p04.zip
 unzip sample_sinus_p04.zip
 ```
 
@@ -30,8 +30,11 @@ conda activate ct_update
 
 Run the following python script
 ```
-python ct_update.py --input ./data/p04_left/input.json
+python ct_update.py --input ./p04_left/input.json
 ```
+
+This script builds an initial mesh based off of the preoperative CT segmentation, then generates updated meshes for 5 consecutive surgical steps using the corresponding endoscopic video and camera trajectories.
+Please refer to the sample `input.json` file to configure your own data for this codebase.
 
 ## Citation
 
